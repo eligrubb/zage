@@ -1,0 +1,11 @@
+.{
+    .name = .zage,
+    .version = "0.1.0",
+    .fingerprint = 0x7bb75644516747d0,
+    .minimum_zig_version = "0.14.1",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
