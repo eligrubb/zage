@@ -34,8 +34,8 @@ pub const X25519Recipient = struct {
         };
     }
 
-    /// Call Stanza.deinit for each stanza in stanzas
-    fn wrapFileKey(self: *X25519Recipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
+    /// Call Stanza.deinit for each stanza in []Stanza
+    pub fn wrapFileKey(self: *X25519Recipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
         assert(file_key.len > 0);
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
@@ -60,6 +60,7 @@ pub const X25519Recipient = struct {
 
         var buffer = arena_allocator.alignedAlloc(u8, .@"16", ENCODED_SCALAR_SIZE) catch return AgeError.OutOfMemory;
         const our_public_key_encoded = base64.encode(buffer[0..ENCODED_SCALAR_SIZE], &our_public_key.toBytes(), base64.Variant.standard_nopad) catch unreachable;
+        // print("our encoded public key: {x}\n", .{our_public_key_encoded});
 
         var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
         try stanzas.append(arena_allocator, .{
@@ -69,20 +70,6 @@ pub const X25519Recipient = struct {
             .arena = arena,
         });
         return stanzas.toOwnedSlice(arena_allocator);
-    }
-
-    fn wrap(ctx: *anyopaque, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
-        const self: *X25519Recipient = @alignCast(@ptrCast(ctx));
-        return self.wrapFileKey(allocator, file_key);
-    }
-
-    pub fn recipient(self: *X25519Recipient) Recipient {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .wrap = wrap,
-            },
-        };
     }
 };
 
@@ -110,7 +97,7 @@ pub const X25519Identity = struct {
         return initFromScalar(secret_key);
     }
 
-    fn unwrapFileKey(self: *X25519Identity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
+    pub fn unwrapFileKey(self: *X25519Identity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
         assert(stanzas.len > 0);
         _ = allocator;
         for (stanzas) |stanza| {
@@ -121,53 +108,36 @@ pub const X25519Identity = struct {
 
             const encoded_public_key = stanza.args[0] orelse return AgeError.InvalidX25519RecpientBlock;
             assert(stanza.args[1] == null);
+            // print("encoded_public_key: {x}\n", .{encoded_public_key});
 
-            const decoded_buf: [X25519_SCALAR_SIZE]u8 = undefined;
-            const their_public_key = base64.decode(decoded_buf, encoded_public_key, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecpientBlock;
-            assert(their_public_key.len == X25519_SCALAR_SIZE);
+            var their_public_key: [X25519_SCALAR_SIZE]u8 = undefined;
+            const decoded_public_key_slice = base64.decode(&their_public_key, encoded_public_key, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecpientBlock;
+            assert(decoded_public_key_slice.len == X25519_SCALAR_SIZE);
 
-            const shared_secret_point = Curve25519.mul(Curve25519.fromBytes(self.secret_key), their_public_key) catch return AgeError.InvalidX25519RecpientBlock;
+            const shared_secret_point = Curve25519.mul(Curve25519.fromBytes(their_public_key), self.secret_key) catch return AgeError.InvalidX25519RecpientBlock;
             const shared_secret = shared_secret_point.toBytes();
 
-            const salt: [X25519_SCALAR_SIZE * 2]u8 = decoded_buf ++ self.our_public_key;
+            const salt: [X25519_SCALAR_SIZE * 2]u8 = their_public_key ++ self.our_public_key;
             const kdf = HkdfSha256;
-            const prk = kdf.extract(salt, shared_secret);
+            const prk = kdf.extract(&salt, &shared_secret);
             var wrapping_key: [CHACHA20POLY1305_KEY_SIZE]u8 = undefined;
-            defer secureZero(u8, wrapping_key);
-            kdf.expand(&wrapping_key, &X25519_LABEL, prk);
+            defer secureZero(u8, &wrapping_key);
+            kdf.expand(&wrapping_key, X25519_LABEL, prk);
 
             var decrypted_file_key: [FILE_KEY_LEN]u8 = undefined;
-            ChaCha20Poly1305.decrypt(&decrypted_file_key, stanza.body[0..FILE_KEY_LEN], stanza.body[FILE_KEY_LEN..].*, [_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, wrapping_key) catch return AgeError.FileKeyDecryptionFailed;
+            defer secureZero(u8, &decrypted_file_key);
+            ChaCha20Poly1305.decrypt(&decrypted_file_key, stanza.body[0..FILE_KEY_LEN], stanza.body[FILE_KEY_LEN..].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, wrapping_key) catch return AgeError.FileKeyDecryptionFailed;
 
             return decrypted_file_key;
         }
         return AgeError.IncorrectIdentity;
     }
 
-    fn unwrap(ctx: *anyopaque, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
-        const self: *X25519Identity = @alignCast(@ptrCast(ctx));
-        return self.unwrapFileKey(allocator, stanzas);
-    }
-
-    pub fn identity(self: *X25519Identity) Identity {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .unwrap = unwrap,
-            },
-        };
-    }
-
-    pub fn x25519Recipient(self: *X25519Identity) X25519Recipient {
-        return .{
+    pub fn recipient(self: *X25519Identity) X25519Recipient {
+        const rec = X25519Recipient{
             .their_public_key = self.our_public_key,
         };
-    }
-
-    pub fn recipient(self: *X25519Identity) Recipient {
-        var x25519_recipient = self.x25519Recipient();
-
-        return x25519_recipient.recipient();
+        return rec;
     }
 };
 
@@ -201,9 +171,10 @@ test "x25519 round trip interfaces" {
     const allocator = std.testing.allocator;
 
     var x25519_identity = try X25519Identity.generate();
+    var x25519_recipient = x25519_identity.recipient();
 
-    var identity = x25519_identity.identity();
-    var recipient = x25519_identity.recipient();
+    var identity = Identity.init(&x25519_identity);
+    var recipient = Recipient.init(&x25519_recipient);
 
     const rng = std.crypto.random;
     var file_key: [FILE_KEY_LEN]u8 = undefined;
