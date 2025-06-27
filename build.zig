@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const minimum_build_zig_version = "0.15.0-dev.847+850655f06";
+
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
