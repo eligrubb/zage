@@ -5,3 +5,7 @@ const age = @import("age");
 pub fn main() !void {
     std.debug.print("Hello, World!\n", .{});
 }
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
+}

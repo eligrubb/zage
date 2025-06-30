@@ -1,5 +1,7 @@
-pub const Error = error{
+pub const AgeError = error{
+    FileKeyDecryptionFailed,
     IncorrectIdentity,
     InvalidScryptRecipientBlock,
-    InvalidPadding,
+    OutOfMemory,
+    ScryptKeyGenerationFailed,
 };
