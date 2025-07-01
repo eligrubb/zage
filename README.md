@@ -1,8 +1,8 @@
 <p align="center">
     <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="https://github.com/eligrubb/zage/tree/main/assets/img/zage-logo-white.png">
-        <source media="(prefers-color-scheme: light)" srcset="https://github.com/eligrubb/zage/tree/main/assets/img/zage-logo.png">
-        <img alt="the Zage logo: the age logo (a wireframe of St. Peters dome in Rome, with the text: age, file encryption) with the Ziglang Z spray painted on top." width="600" src="https://github.com/eligrubb/zage/tree/main/assets/img/zage-logo.svg"
+        <source media="(prefers-color-scheme: dark)" srcset="./assets/img/zage-logo-white.png">
+        <source media="(prefers-color-scheme: light)" srcset="./assets/img/zage-logo.png">
+        <img alt="the Zage logo: the age logo (a wireframe of St. Peters dome in Rome, with the text: age, file encryption) with the Ziglang Z spray painted on top." width="600" src="./assets/img/zage-logo.svg"
     </picture>
 </p>
 
