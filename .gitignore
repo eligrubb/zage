@@ -1,3 +1,7 @@
 zig-out/
 .zig-cache/
 *.psd
+.DS_Store
+._.DS_Store
+**/.DS_Store
+**/._.DS_Store
