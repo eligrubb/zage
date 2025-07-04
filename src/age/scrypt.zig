@@ -4,6 +4,8 @@ const assert = std.debug.assert;
 
 const AgeError = @import("errors.zig").AgeError;
 const Stanza = @import("Stanza.zig");
+const Recipient = @import("Recipient.zig");
+const Identity = @import("Identity.zig");
 
 const primitives = @import("primitives.zig");
 const constants = @import("constants.zig");
@@ -18,7 +20,6 @@ const ENCODED_SALT_SIZE = 22;
 const SCRYPT_RECIPIENT_TAG = "scrypt";
 const SCRYPT_SALT_LABEL = "age-encryption.org/v1/scrypt";
 const FILE_KEY_LEN = constants.FILE_KEY_BYTES;
-const MAX_LOG_N: u8 = 63;
 const MAX_USIZE = std.math.maxInt(usize);
 const MAX_INT = MAX_USIZE >> 1;
 
@@ -28,7 +29,7 @@ pub const ScryptRecipient = struct {
     const owasp_r: u30 = 8; // scrypt.Params.owasp.r, // 8
     const owasp_p: u30 = 1; // scrypt.Params.owasp.p, // 1
 
-    inline fn getMaxAllocSize(ln: u6, r: u30, p: u30) usize {
+    inline fn getMaxScryptAllocSize(ln: u6, r: u30, p: u30) usize {
         const n64 = @as(u64, 1) << ln;
         if (n64 > MAX_USIZE) return MAX_INT / 128 / @as(u64, r);
         const n = @as(usize, @intCast(n64));
@@ -55,7 +56,7 @@ pub const ScryptRecipient = struct {
         return ENCODED_SALT_SIZE + (32 % ENCODED_SALT_SIZE) + log_n_str.len;
     }
 
-    pub fn wrapFileKey(self: *const ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError![1]Stanza {
+    pub fn wrapFileKey(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
         assert(file_key.len > 0);
 
         const rng = primitives.random;
@@ -80,19 +81,20 @@ pub const ScryptRecipient = struct {
 
         var buffer = allocator.alignedAlloc(u8, .@"16", self.getBufferSize()) catch return AgeError.OutOfMemory;
         const encoded_salt = base64.encode(buffer[0..ENCODED_SALT_SIZE], salt[0..], base64.Variant.standard_nopad) catch unreachable;
+        // start log_n_str at 32 so accesses are 16 and 32 byte aligned
         const log_n_str = std.fmt.bufPrint(buffer[32..], "{}", .{self.log_n}) catch unreachable;
 
-        const stanza = Stanza{
+        var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(allocator, 1);
+        try stanzas.append(allocator, .{
             .tag = SCRYPT_RECIPIENT_TAG,
             .args = .{ encoded_salt, log_n_str },
             .body = encrypted_file_key ++ tag,
             .buffer = buffer,
-        };
-
-        return [_]Stanza{stanza};
+        });
+        return stanzas.toOwnedSlice(allocator);
     }
 
-    pub fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: Allocator, file_key: []u8) AgeError!.{ []Stanza, [][]const u8 } {
+    pub fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError!.{ []Stanza, [][]const u8 } {
         const stanzas = try self.wrapFileKey(allocator, file_key);
 
         const rng = primitives.random;
@@ -103,6 +105,17 @@ pub const ScryptRecipient = struct {
         const random_label = try std.fmt.bufPrint(&buf, "{}", .{random});
 
         return .{ stanzas, &[_][]const u8{random_label[0..]} };
+    }
+
+    fn wrap(ctx: *anyopaque, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
+        const self: *ScryptRecipient = @alignCast(@ptrCast(ctx));
+        return self.wrapFileKey(allocator, file_key);
+    }
+
+    pub fn recipient(self: *ScryptRecipient) Recipient {
+        return .{ .ptr = self, .vtable = &.{
+            .wrap = wrap,
+        } };
     }
 };
 
@@ -124,7 +137,7 @@ pub const ScryptIdentity = struct {
         self.max_log_n = @truncate(max_work_factor);
     }
 
-    pub fn unwrapFileKey(self: *const ScryptIdentity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
+    pub fn unwrapFileKey(self: *ScryptIdentity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
         assert(stanzas.len > 0);
         for (stanzas) |stanza| {
             if (!std.mem.eql(u8, stanza.tag, SCRYPT_RECIPIENT_TAG)) continue;
@@ -133,9 +146,9 @@ pub const ScryptIdentity = struct {
 
             var inner_salt: [SCRYPT_SALT_LABEL.len + SALT_SIZE]u8 = SCRYPT_SALT_LABEL.* ++ [_]u8{0} ** SALT_SIZE;
             const decoded_buf = inner_salt[SCRYPT_SALT_LABEL.len..]; // or call base64.decodedLen(stanza.args[0].len, base64.Variant.standard_nopad)
-            _ = base64.decode(decoded_buf, stanza.args[0], base64.Variant.standard_nopad) catch return AgeError.InvalidScryptRecipientBlock;
+            const decoded_salt = base64.decode(decoded_buf, stanza.args[0], base64.Variant.standard_nopad) catch return AgeError.InvalidScryptRecipientBlock;
+            if (decoded_salt.len != SALT_SIZE) return AgeError.InvalidScryptRecipientBlock;
 
-            if (decoded_buf.len != SALT_SIZE) return AgeError.InvalidScryptRecipientBlock;
             const log_n = std.fmt.parseInt(u6, stanza.args[1], 10) catch return AgeError.InvalidScryptRecipientBlock;
             if (log_n < 0 or self.max_log_n < log_n) return AgeError.InvalidScryptRecipientBlock;
 
@@ -157,13 +170,28 @@ pub const ScryptIdentity = struct {
         }
         return AgeError.IncorrectIdentity;
     }
+
+    fn unwrap(ctx: *anyopaque, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
+        const self: *ScryptIdentity = @alignCast(@ptrCast(ctx));
+        return self.unwrapFileKey(allocator, stanzas);
+    }
+
+    pub fn identity(self: *ScryptIdentity) Identity {
+        return .{ .ptr = self, .vtable = &.{
+            .unwrap = unwrap,
+        } };
+    }
 };
 
 test "scrypt round trip og" {
     const password = "twitch.tv/filosottile";
-    const allocator = std.testing.allocator;
+    const test_allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(test_allocator);
+    defer arena.deinit();
 
-    const identity = ScryptIdentity.init(password);
+    const allocator = arena.allocator();
+
+    var identity = ScryptIdentity.init(password);
     var recipient = ScryptRecipient.init(password);
     recipient.setWorkFactor(15);
 
@@ -171,17 +199,48 @@ test "scrypt round trip og" {
     var file_key: [FILE_KEY_LEN]u8 = undefined;
     rng.bytes(&file_key);
 
-    var stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    // irrelevant because now I'm taking advantage of arena allocators! :D
+    // defer allocator.free(stanzas);
     // TODO switch to this form, much nicer looking
     // but stanza is a const for some reason so i can't call deinit
     // so gotta figure out how to for each without producing constants
+    // okay it was just because I was expecting a pointer at all in my Stanza deinit definition
+    // instead of defining self as *Stanza I changed it to just Stanza and this now works
     // defer for (stanzas) |stanza| {
     //     stanza.deinit(allocator);
     // };
-    defer for (0..stanzas.len) |i| {
-        stanzas[i].deinit(allocator);
-    };
-    var decrypted_file_key = try identity.unwrapFileKey(allocator, &stanzas);
+    // old
+    // TODO add to zig learning devlog
+    // defer for (0..stanzas.len) |i| {
+    //     stanzas[i].deinit(allocator);
+    // };
+    var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
+
+    try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+}
+
+test "scrypt round trip interfaces" {
+    const password = "twitch.tv/filosottile";
+    const test_allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(test_allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+
+    var scrypt_identity = ScryptIdentity.init(password);
+    var scrypt_recipient = ScryptRecipient.init(password);
+    scrypt_recipient.setWorkFactor(15);
+
+    var identity = scrypt_identity.identity();
+    var recipient = scrypt_recipient.recipient();
+
+    const rng = primitives.random;
+    var file_key: [FILE_KEY_LEN]u8 = undefined;
+    rng.bytes(&file_key);
+
+    const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
 
     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
 }
