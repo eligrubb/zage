@@ -56,8 +56,11 @@ pub const ScryptRecipient = struct {
         return ENCODED_SALT_SIZE + (32 % ENCODED_SALT_SIZE) + log_n_str.len;
     }
 
-    pub fn wrapFileKey(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
+    /// Call Stanza.deinit for each stanza in stanzas
+    fn wrapFileKey(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
         assert(file_key.len > 0);
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        var arena_allocator = arena.allocator();
 
         const rng = primitives.random;
         var salt: [SALT_SIZE]u8 = undefined;
@@ -79,22 +82,22 @@ pub const ScryptRecipient = struct {
 
         ChaCha20Poly1305.encrypt(&encrypted_file_key, &tag, file_key, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key);
 
-        var buffer = allocator.alignedAlloc(u8, .@"16", self.getBufferSize()) catch return AgeError.OutOfMemory;
+        var buffer = arena_allocator.alignedAlloc(u8, .@"16", self.getBufferSize()) catch return AgeError.OutOfMemory;
         const encoded_salt = base64.encode(buffer[0..ENCODED_SALT_SIZE], salt[0..], base64.Variant.standard_nopad) catch unreachable;
         // start log_n_str at 32 so accesses are 16 and 32 byte aligned
         const log_n_str = std.fmt.bufPrint(buffer[32..], "{}", .{self.log_n}) catch unreachable;
 
-        var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(allocator, 1);
-        try stanzas.append(allocator, .{
+        var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
+        try stanzas.append(arena_allocator, .{
             .tag = SCRYPT_RECIPIENT_TAG,
             .args = .{ encoded_salt, log_n_str },
             .body = encrypted_file_key ++ tag,
-            .buffer = buffer,
+            .arena = arena,
         });
-        return stanzas.toOwnedSlice(allocator);
+        return stanzas.toOwnedSlice(arena_allocator);
     }
 
-    pub fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError!.{ []Stanza, [][]const u8 } {
+    fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError!.{ []Stanza, [][]const u8 } {
         const stanzas = try self.wrapFileKey(allocator, file_key);
 
         const rng = primitives.random;
@@ -137,7 +140,7 @@ pub const ScryptIdentity = struct {
         self.max_log_n = @truncate(max_work_factor);
     }
 
-    pub fn unwrapFileKey(self: *ScryptIdentity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
+    fn unwrapFileKey(self: *ScryptIdentity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
         assert(stanzas.len > 0);
         for (stanzas) |stanza| {
             if (!std.mem.eql(u8, stanza.tag, SCRYPT_RECIPIENT_TAG)) continue;
@@ -185,11 +188,11 @@ pub const ScryptIdentity = struct {
 
 test "scrypt round trip og" {
     const password = "twitch.tv/filosottile";
-    const test_allocator = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(test_allocator);
-    defer arena.deinit();
+    const allocator = std.testing.allocator;
+    // var arena = std.heap.ArenaAllocator.init(test_allocator);
+    // defer arena.deinit();
 
-    const allocator = arena.allocator();
+    // const allocator = arena.allocator();
 
     var identity = ScryptIdentity.init(password);
     var recipient = ScryptRecipient.init(password);
@@ -207,9 +210,9 @@ test "scrypt round trip og" {
     // so gotta figure out how to for each without producing constants
     // okay it was just because I was expecting a pointer at all in my Stanza deinit definition
     // instead of defining self as *Stanza I changed it to just Stanza and this now works
-    // defer for (stanzas) |stanza| {
-    //     stanza.deinit(allocator);
-    // };
+    defer for (stanzas) |stanza| {
+        stanza.deinit();
+    };
     // old
     // TODO add to zig learning devlog
     // defer for (0..stanzas.len) |i| {
@@ -222,11 +225,7 @@ test "scrypt round trip og" {
 
 test "scrypt round trip interfaces" {
     const password = "twitch.tv/filosottile";
-    const test_allocator = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(test_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = std.testing.allocator;
 
     var scrypt_identity = ScryptIdentity.init(password);
     var scrypt_recipient = ScryptRecipient.init(password);
@@ -240,6 +239,9 @@ test "scrypt round trip interfaces" {
     rng.bytes(&file_key);
 
     const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    defer for (stanzas) |stanza| {
+        stanza.deinit();
+    };
     var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
 
     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
