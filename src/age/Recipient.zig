@@ -16,6 +16,7 @@ pub fn rawWrap(self: Recipient, allocator: mem.Allocator, file_key: []const u8) 
     return self.vtable.wrap(self.ptr, allocator, file_key);
 }
 
+/// Call Stanza.deinit for each stanza in stanzas
 pub fn wrapFileKey(self: Recipient, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
     return self.rawWrap(allocator, file_key);
 }

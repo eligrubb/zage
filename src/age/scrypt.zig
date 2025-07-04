@@ -1,17 +1,16 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const scrypt = std.crypto.pwhash.scrypt;
+const constants = @import("constants.zig");
+const base64 = std.crypto.codecs.base64;
+const secureZero = std.crypto.secureZero;
 
 const AgeError = @import("errors.zig").AgeError;
-const Stanza = @import("Stanza.zig");
-const Recipient = @import("Recipient.zig");
+const Allocator = std.mem.Allocator;
+const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 const Identity = @import("Identity.zig");
-
-const primitives = @import("primitives.zig");
-const constants = @import("constants.zig");
-const scrypt = primitives.scrypt;
-const ChaCha20Poly1305 = primitives.ChaCha20Poly1305;
-const base64 = primitives.base64;
+const Recipient = @import("Recipient.zig");
+const Stanza = @import("Stanza.zig");
 
 const SALT_SIZE = 16;
 // const leftover = SALT_SIZE % 3;
@@ -62,7 +61,7 @@ pub const ScryptRecipient = struct {
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
 
-        const rng = primitives.random;
+        const rng = std.crypto.random;
         var salt: [SALT_SIZE]u8 = undefined;
         rng.bytes(&salt);
 
@@ -78,8 +77,7 @@ pub const ScryptRecipient = struct {
         }) catch return AgeError.ScryptKeyGenerationFailed;
 
         var encrypted_file_key: [FILE_KEY_LEN]u8 = undefined;
-        var tag: [ChaCha20Poly1305.tag_length]u8 = undefined;
-
+        var tag: [constants.ChaCha20Poly1305.tag_length]u8 = undefined;
         ChaCha20Poly1305.encrypt(&encrypted_file_key, &tag, file_key, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key);
 
         var buffer = arena_allocator.alignedAlloc(u8, .@"16", self.getBufferSize()) catch return AgeError.OutOfMemory;
@@ -100,7 +98,7 @@ pub const ScryptRecipient = struct {
     fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError!.{ []Stanza, [][]const u8 } {
         const stanzas = try self.wrapFileKey(allocator, file_key);
 
-        const rng = primitives.random;
+        const rng = std.crypto.random;
         var random: [16]u8 = undefined;
         rng.bytes(&random);
 
@@ -116,9 +114,12 @@ pub const ScryptRecipient = struct {
     }
 
     pub fn recipient(self: *ScryptRecipient) Recipient {
-        return .{ .ptr = self, .vtable = &.{
-            .wrap = wrap,
-        } };
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .wrap = wrap,
+            },
+        };
     }
 };
 
@@ -158,7 +159,7 @@ pub const ScryptIdentity = struct {
             // const inner_salt = SCRYPT_SALT_LABEL[0..SCRYPT_SALT_LABEL.len] ++ decoded_salt[0..];
 
             var key: [ChaCha20Poly1305.key_length]u8 = undefined;
-            defer primitives.secureZero(u8, &key);
+            defer secureZero(u8, &key);
 
             scrypt.kdf(allocator, &key, self.password, &inner_salt, .{
                 .ln = log_n,
@@ -198,7 +199,7 @@ test "scrypt round trip og" {
     var recipient = ScryptRecipient.init(password);
     recipient.setWorkFactor(15);
 
-    const rng = primitives.random;
+    const rng = std.crypto.random;
     var file_key: [FILE_KEY_LEN]u8 = undefined;
     rng.bytes(&file_key);
 
@@ -234,7 +235,7 @@ test "scrypt round trip interfaces" {
     var identity = scrypt_identity.identity();
     var recipient = scrypt_recipient.recipient();
 
-    const rng = primitives.random;
+    const rng = std.crypto.random;
     var file_key: [FILE_KEY_LEN]u8 = undefined;
     rng.bytes(&file_key);
 
