@@ -145,15 +145,19 @@ pub const ScryptIdentity = struct {
         assert(stanzas.len > 0);
         for (stanzas) |stanza| {
             if (!std.mem.eql(u8, stanza.tag, SCRYPT_RECIPIENT_TAG)) continue;
-            if (stanza.args.len != 2) return AgeError.InvalidScryptRecipientBlock;
+
+            assert(stanza.args.len == 2);
             if (stanza.body.len != constants.ChaCha20Poly1305.key_length + constants.ChaCha20Poly1305.tag_length) return AgeError.InvalidScryptRecipientBlock;
+
+            const encoded_salt = stanza.args[0] orelse return AgeError.InvalidScryptRecipientBlock;
+            const encoded_log_n = stanza.args[1] orelse return AgeError.InvalidScryptRecipientBlock;
 
             var inner_salt: [SCRYPT_SALT_LABEL.len + SALT_SIZE]u8 = SCRYPT_SALT_LABEL.* ++ [_]u8{0} ** SALT_SIZE;
             const decoded_buf = inner_salt[SCRYPT_SALT_LABEL.len..]; // or call base64.decodedLen(stanza.args[0].len, base64.Variant.standard_nopad)
-            const decoded_salt = base64.decode(decoded_buf, stanza.args[0], base64.Variant.standard_nopad) catch return AgeError.InvalidScryptRecipientBlock;
-            if (decoded_salt.len != SALT_SIZE) return AgeError.InvalidScryptRecipientBlock;
+            const decoded_salt = base64.decode(decoded_buf, encoded_salt, base64.Variant.standard_nopad) catch return AgeError.InvalidScryptRecipientBlock;
+            assert(decoded_salt.len == SALT_SIZE);
 
-            const log_n = std.fmt.parseInt(u6, stanza.args[1], 10) catch return AgeError.InvalidScryptRecipientBlock;
+            const log_n = std.fmt.parseInt(u6, encoded_log_n, 10) catch return AgeError.InvalidScryptRecipientBlock;
             if (log_n < 0 or self.max_log_n < log_n) return AgeError.InvalidScryptRecipientBlock;
 
             // const inner_salt = SCRYPT_SALT_LABEL[0..SCRYPT_SALT_LABEL.len] ++ decoded_salt[0..];
@@ -168,7 +172,7 @@ pub const ScryptIdentity = struct {
             }) catch return AgeError.ScryptKeyGenerationFailed;
 
             var decrypted_file_key: [FILE_KEY_LEN]u8 = undefined;
-            ChaCha20Poly1305.decrypt(&decrypted_file_key, stanza.body[0..FILE_KEY_LEN], stanza.body[FILE_KEY_LEN .. FILE_KEY_LEN + SALT_SIZE].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key) catch return AgeError.FileKeyDecryptionFailed;
+            ChaCha20Poly1305.decrypt(&decrypted_file_key, stanza.body[0..FILE_KEY_LEN], stanza.body[FILE_KEY_LEN .. FILE_KEY_LEN + ChaCha20Poly1305.tag_length].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key) catch return AgeError.FileKeyDecryptionFailed;
 
             return decrypted_file_key;
         }
@@ -181,9 +185,12 @@ pub const ScryptIdentity = struct {
     }
 
     pub fn identity(self: *ScryptIdentity) Identity {
-        return .{ .ptr = self, .vtable = &.{
-            .unwrap = unwrap,
-        } };
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .unwrap = unwrap,
+            },
+        };
     }
 };
 
