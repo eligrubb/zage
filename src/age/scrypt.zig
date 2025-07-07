@@ -55,8 +55,8 @@ pub const ScryptRecipient = struct {
         return ENCODED_SALT_SIZE + (32 % ENCODED_SALT_SIZE) + log_n_str.len;
     }
 
-    /// Call Stanza.deinit for each stanza in stanzas
-    fn wrapFileKey(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
+    /// Call Stanza.deinit for each stanza in []Stanza
+    pub fn wrapFileKey(self: *ScryptRecipient, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
         assert(file_key.len > 0);
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
@@ -107,20 +107,6 @@ pub const ScryptRecipient = struct {
 
         return .{ stanzas, &[_][]const u8{random_label[0..]} };
     }
-
-    fn wrap(ctx: *anyopaque, allocator: Allocator, file_key: []const u8) AgeError![]Stanza {
-        const self: *ScryptRecipient = @alignCast(@ptrCast(ctx));
-        return self.wrapFileKey(allocator, file_key);
-    }
-
-    pub fn recipient(self: *ScryptRecipient) Recipient {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .wrap = wrap,
-            },
-        };
-    }
 };
 
 pub const ScryptIdentity = struct {
@@ -141,7 +127,7 @@ pub const ScryptIdentity = struct {
         self.max_log_n = @truncate(max_work_factor);
     }
 
-    fn unwrapFileKey(self: *ScryptIdentity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
+    pub fn unwrapFileKey(self: *ScryptIdentity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
         assert(stanzas.len > 0);
         for (stanzas) |stanza| {
             if (!std.mem.eql(u8, stanza.tag, SCRYPT_RECIPIENT_TAG)) continue;
@@ -177,20 +163,6 @@ pub const ScryptIdentity = struct {
             return decrypted_file_key;
         }
         return AgeError.IncorrectIdentity;
-    }
-
-    fn unwrap(ctx: *anyopaque, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
-        const self: *ScryptIdentity = @alignCast(@ptrCast(ctx));
-        return self.unwrapFileKey(allocator, stanzas);
-    }
-
-    pub fn identity(self: *ScryptIdentity) Identity {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .unwrap = unwrap,
-            },
-        };
     }
 };
 
@@ -239,8 +211,11 @@ test "scrypt round trip interfaces" {
     var scrypt_recipient = ScryptRecipient.init(password);
     scrypt_recipient.setWorkFactor(15);
 
-    var identity = scrypt_identity.identity();
-    var recipient = scrypt_recipient.recipient();
+    var identity = Identity.init(&scrypt_identity);
+    var recipient = Recipient.init(&scrypt_recipient);
+
+    //var identity = scrypt_identity.identity();
+    //var recipient = scrypt_recipient.recipient();
 
     const rng = std.crypto.random;
     var file_key: [FILE_KEY_LEN]u8 = undefined;
