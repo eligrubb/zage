@@ -12,10 +12,18 @@ pub fn build(b: *std.Build) !void {
 
     const tests_step = b.step("test", "Run tests");
 
-    const tests = b.addTest(.{
+    const zage_tests = b.addTest(.{
         .version = version,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/zage.zig"),
+            .target = target,
+        }),
+    });
+
+    const age_tests = b.addTest(.{
+        .version = version,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/age.zig"),
             .target = target,
         }),
     });
@@ -32,10 +40,12 @@ pub fn build(b: *std.Build) !void {
         }),
     });
 
-    tests.root_module.addImport("age", mod);
+    zage_tests.root_module.addImport("age", mod);
 
-    const tests_run = b.addRunArtifact(tests);
-    tests_step.dependOn(&tests_run.step);
+    const zage_tests_run = b.addRunArtifact(zage_tests);
+    const age_tests_run = b.addRunArtifact(age_tests);
+    tests_step.dependOn(&zage_tests_run.step);
+    tests_step.dependOn(&age_tests_run.step);
     b.getInstallStep().dependOn(tests_step);
 
     exe.root_module.addImport("age", mod);
