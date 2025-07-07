@@ -8,7 +8,13 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod = b.addModule("age", .{ .root_source_file = b.path("src/age.zig") });
+    const age_mod = b.addModule("age", .{ .root_source_file = b.path("src/age.zig") });
+
+    const bech32_mod = b.addModule("bech32", .{ .root_source_file = b.path("src/age/internal/bech32.zig") });
+    age_mod.addImport("bech32", bech32_mod);
+
+    // const bech32 = b.dependency("bech32", .{});
+    // mod.addImport("bech32", bech32.module("bech32"));
 
     const tests_step = b.step("test", "Run tests");
 
@@ -33,14 +39,14 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/zage.zig"),
             .imports = &.{
-                .{ .name = "age", .module = mod },
+                .{ .name = "age", .module = age_mod },
             },
             .target = target,
             .optimize = optimize,
         }),
     });
 
-    zage_tests.root_module.addImport("age", mod);
+    zage_tests.root_module.addImport("age", age_mod);
 
     const zage_tests_run = b.addRunArtifact(zage_tests);
     const age_tests_run = b.addRunArtifact(age_tests);
@@ -48,7 +54,7 @@ pub fn build(b: *std.Build) !void {
     tests_step.dependOn(&age_tests_run.step);
     b.getInstallStep().dependOn(tests_step);
 
-    exe.root_module.addImport("age", mod);
+    exe.root_module.addImport("age", age_mod);
 
     b.installArtifact(exe);
 }

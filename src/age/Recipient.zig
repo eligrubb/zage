@@ -7,8 +7,8 @@ pub const Recipient = @This();
 ptr: *anyopaque,
 vtable: *const VTable,
 
-pub fn init(pointer: anytype) Recipient {
-    const T = @TypeOf(pointer);
+pub fn init(recipient_ptr: anytype) Recipient {
+    const T = @TypeOf(recipient_ptr);
 
     const gen = struct {
         fn wrap(ctx: *anyopaque, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
@@ -18,7 +18,7 @@ pub fn init(pointer: anytype) Recipient {
     };
 
     return .{
-        .ptr = pointer,
+        .ptr = recipient_ptr,
         .vtable = &.{
             .wrap = gen.wrap,
         },
