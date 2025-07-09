@@ -1,4 +1,5 @@
-pub const FILE_KEY_BYTES: usize = 32;
+pub const FILE_KEY_BYTES: usize = 16;
+pub const BASE64_ENCODED_FILE_KEY_BYTES: usize = 43;
 pub const ChaCha20Poly1305 = struct {
     pub const key_length: usize = 32;
     pub const nonce_length: usize = 12;

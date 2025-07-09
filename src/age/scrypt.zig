@@ -21,6 +21,8 @@ const SCRYPT_SALT_LABEL = "age-encryption.org/v1/scrypt";
 const FILE_KEY_LEN = constants.FILE_KEY_BYTES;
 const MAX_USIZE = std.math.maxInt(usize);
 const MAX_INT = MAX_USIZE >> 1;
+const BASE64_ENCODED_FILE_KEY_SIZE = constants.BASE64_ENCODED_FILE_KEY_BYTES;
+const CHACHA20POLY1305_KEY_SIZE = constants.ChaCha20Poly1305.key_length;
 
 pub const ScryptRecipient = struct {
     password: []const u8,
@@ -68,7 +70,7 @@ pub const ScryptRecipient = struct {
         const inner_salt = SCRYPT_SALT_LABEL.* ++ salt[0..];
         // const inner_salt: [SCRYPT_SALT_LABEL.len + SALT_SIZE]u8 = SCRYPT_SALT_LABEL.* ++ salt[0..];
 
-        var key: [FILE_KEY_LEN]u8 = undefined;
+        var key: [CHACHA20POLY1305_KEY_SIZE]u8 = undefined;
 
         scrypt.kdf(allocator, &key, self.password, inner_salt, .{
             .ln = self.log_n,
@@ -85,11 +87,16 @@ pub const ScryptRecipient = struct {
         // start log_n_str at 32 so accesses are 16 and 32 byte aligned
         const log_n_str = std.fmt.bufPrint(buffer[32..], "{}", .{self.log_n}) catch unreachable;
 
+        var encoded_file_key: [BASE64_ENCODED_FILE_KEY_SIZE]u8 = undefined;
+        const ciphertext = encrypted_file_key ++ tag;
+        const our_encrypted_file_key_encoded = base64.encode(&encoded_file_key, &ciphertext, base64.Variant.standard_nopad) catch unreachable;
+        assert(our_encrypted_file_key_encoded.len == BASE64_ENCODED_FILE_KEY_SIZE);
+
         var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
         try stanzas.append(arena_allocator, .{
             .tag = SCRYPT_RECIPIENT_TAG,
             .args = .{ encoded_salt, log_n_str },
-            .body = encrypted_file_key ++ tag,
+            .body = encoded_file_key,
             .arena = arena,
         });
         return stanzas.toOwnedSlice(arena_allocator);
@@ -133,7 +140,10 @@ pub const ScryptIdentity = struct {
             if (!std.mem.eql(u8, stanza.tag, SCRYPT_RECIPIENT_TAG)) continue;
 
             assert(stanza.args.len == 2);
-            if (stanza.body.len != constants.ChaCha20Poly1305.key_length + constants.ChaCha20Poly1305.tag_length) return AgeError.InvalidScryptRecipientBlock;
+            if (stanza.body.len != BASE64_ENCODED_FILE_KEY_SIZE) return AgeError.InvalidScryptRecipientBlock;
+            var ciphertext: [FILE_KEY_LEN + constants.ChaCha20Poly1305.tag_length]u8 = undefined;
+            const decoded_ciphertext = base64.decode(&ciphertext, &stanza.body, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecipientBlock;
+            assert(decoded_ciphertext.len == FILE_KEY_LEN + constants.ChaCha20Poly1305.tag_length);
 
             const encoded_salt = stanza.args[0] orelse return AgeError.InvalidScryptRecipientBlock;
             const encoded_log_n = stanza.args[1] orelse return AgeError.InvalidScryptRecipientBlock;
@@ -158,7 +168,7 @@ pub const ScryptIdentity = struct {
             }) catch return AgeError.ScryptKeyGenerationFailed;
 
             var decrypted_file_key: [FILE_KEY_LEN]u8 = undefined;
-            ChaCha20Poly1305.decrypt(&decrypted_file_key, stanza.body[0..FILE_KEY_LEN], stanza.body[FILE_KEY_LEN .. FILE_KEY_LEN + ChaCha20Poly1305.tag_length].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key) catch return AgeError.FileKeyDecryptionFailed;
+            ChaCha20Poly1305.decrypt(&decrypted_file_key, ciphertext[0..FILE_KEY_LEN], ciphertext[FILE_KEY_LEN .. FILE_KEY_LEN + ChaCha20Poly1305.tag_length].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key) catch return AgeError.FileKeyDecryptionFailed;
 
             return decrypted_file_key;
         }
@@ -227,5 +237,32 @@ test "scrypt round trip interfaces" {
     };
     var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
 
+    try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+}
+
+test "scrypt basic unwrap" {
+    const allocator = std.testing.allocator;
+
+    // from https://github.com/C2SP/CCTV/blob/main/age/testdata/scrypt
+    const password = "password";
+    const stanza_arg_0 = "rF0/NwblUHHTpgQgRpe5CQ";
+    const stanza_arg_1 = "10";
+    const stanza_body = "gUjEymFKMVXQEKdMMHL24oYexjE3TIC0O0zGSqJ2aUY";
+
+    var sIdentity = ScryptIdentity.init(password);
+    const identity = Identity.init(&sIdentity);
+
+    const file_key = [_]u8{ 0x59, 0x45, 0x4c, 0x4c, 0x4f, 0x57, 0x20, 0x53, 0x55, 0x42, 0x4d, 0x41, 0x52, 0x49, 0x4e, 0x45 };
+
+    const stanzas = [_]Stanza{
+        Stanza{
+            .tag = SCRYPT_RECIPIENT_TAG,
+            .args = [_]?[]const u8{ stanza_arg_0, stanza_arg_1 },
+            .body = stanza_body.*,
+            .arena = null,
+        },
+    };
+
+    const decrypted_file_key = try identity.unwrapFileKey(allocator, &stanzas);
     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
 }

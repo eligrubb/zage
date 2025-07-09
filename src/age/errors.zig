@@ -4,7 +4,7 @@ pub const AgeError = error{
     IncorrectKeyLength,
     InvalidBech32String,
     InvalidScryptRecipientBlock,
-    InvalidX25519RecpientBlock,
+    InvalidX25519RecipientBlock,
     OutOfMemory,
     ScryptKeyGenerationFailed,
 };

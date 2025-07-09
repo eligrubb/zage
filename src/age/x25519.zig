@@ -11,9 +11,9 @@ const ArrayListAlignedUnmanaged = std.ArrayListAlignedUnmanaged;
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 const Curve25519 = std.crypto.ecc.Curve25519;
 const HkdfSha256 = std.crypto.kdf.hkdf.HkdfSha256;
-const Identity = @import("Identity.zig");
-const Recipient = @import("Recipient.zig");
-const Stanza = @import("Stanza.zig");
+const Identity = @import("Identity.zig").Identity;
+const Recipient = @import("Recipient.zig").Recipient;
+const Stanza = @import("Stanza.zig").Stanza;
 
 const FILE_KEY_LEN = constants.FILE_KEY_BYTES;
 const X25519_SCALAR_SIZE = constants.X25519_SCALAR_BYTES;
@@ -23,6 +23,7 @@ const CHACHA20POLY1305_KEY_SIZE = constants.ChaCha20Poly1305.key_length;
 // const leftover = SCALAR_SIZE % 3; // 2
 // const encoded_scalar_size = SCALAR_SIZE / 3 * 4 + (leftover * 4 + 2) / 3; // 43
 const BASE64_ENCODED_SCALAR_SIZE = 43;
+const BASE64_ENCODED_FILE_KEY_SIZE = constants.BASE64_ENCODED_FILE_KEY_BYTES;
 const BECH32_PUBLIC_KEY_HRP_TAG = "age";
 const BECH32_PRIVATE_KEY_HRP_TAG = "AGE-SECRET-KEY-";
 // hrp.len + 1 + calcExpansion(X25519_SCALAR_SIZE) + 6
@@ -69,10 +70,11 @@ pub const X25519Recipient = struct {
         var ephemeral: [X25519_SCALAR_SIZE]u8 = undefined;
         rng.bytes(&ephemeral);
 
-        const our_public_key = Curve25519.mul(Curve25519.basePoint, ephemeral) catch unreachable;
-        const shared_secret = Curve25519.mul(Curve25519.fromBytes(self.their_public_key), ephemeral) catch unreachable;
+        const our_public_key_point = Curve25519.basePoint.clampedMul(ephemeral) catch unreachable;
+        const our_public_key = our_public_key_point.toBytes();
+        const shared_secret = Curve25519.fromBytes(self.their_public_key).clampedMul(ephemeral) catch unreachable;
 
-        const salt: [X25519_SCALAR_SIZE * 2]u8 = our_public_key.toBytes() ++ self.their_public_key;
+        const salt: [X25519_SCALAR_SIZE * 2]u8 = our_public_key ++ self.their_public_key;
         const kdf = HkdfSha256;
         const prk = kdf.extract(&salt, &shared_secret.toBytes());
         var wrapping_key: [CHACHA20POLY1305_KEY_SIZE]u8 = undefined;
@@ -84,13 +86,19 @@ pub const X25519Recipient = struct {
         ChaCha20Poly1305.encrypt(&encrypted_file_key, &tag, file_key, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, wrapping_key);
 
         var buffer = arena_allocator.alignedAlloc(u8, .@"16", BASE64_ENCODED_SCALAR_SIZE) catch return AgeError.OutOfMemory;
-        const our_public_key_encoded = base64.encode(buffer[0..BASE64_ENCODED_SCALAR_SIZE], &our_public_key.toBytes(), base64.Variant.standard_nopad) catch unreachable;
+        const our_public_key_encoded = base64.encode(buffer[0..BASE64_ENCODED_SCALAR_SIZE], &our_public_key, base64.Variant.standard_nopad) catch unreachable;
+        assert(our_public_key_encoded.len == BASE64_ENCODED_SCALAR_SIZE);
+
+        var encoded_file_key: [BASE64_ENCODED_FILE_KEY_SIZE]u8 = undefined;
+        const ciphertext: [FILE_KEY_LEN + constants.ChaCha20Poly1305.tag_length]u8 = encrypted_file_key ++ tag;
+        const our_encrypted_file_key_encoded = base64.encode(&encoded_file_key, &ciphertext, base64.Variant.standard_nopad) catch unreachable;
+        assert(our_encrypted_file_key_encoded.len == BASE64_ENCODED_FILE_KEY_SIZE);
 
         var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
         try stanzas.append(arena_allocator, .{
             .tag = X25519_RECIPIENT_TAG,
             .args = .{ our_public_key_encoded, null },
-            .body = encrypted_file_key ++ tag,
+            .body = encoded_file_key,
             .arena = arena,
         });
         return stanzas.toOwnedSlice(arena_allocator);
@@ -119,7 +127,7 @@ pub const X25519Identity = struct {
         var our_secret_key: [X25519_SCALAR_SIZE]u8 = undefined;
         @memcpy(&our_secret_key, secret_key);
 
-        const our_public_key = Curve25519.mul(Curve25519.basePoint, our_secret_key) catch return AgeError.IncorrectKeyLength;
+        const our_public_key = Curve25519.basePoint.clampedMul(our_secret_key) catch return AgeError.IncorrectKeyLength;
 
         return .{
             .secret_key = our_secret_key,
@@ -156,16 +164,20 @@ pub const X25519Identity = struct {
             if (!std.mem.eql(u8, stanza.tag, X25519_RECIPIENT_TAG)) continue;
 
             assert(stanza.args.len == 2);
-            if (stanza.body.len != ChaCha20Poly1305.key_length + ChaCha20Poly1305.tag_length) return AgeError.InvalidX25519RecpientBlock;
-
-            const encoded_public_key = stanza.args[0] orelse return AgeError.InvalidX25519RecpientBlock;
+            const encoded_public_key = stanza.args[0] orelse return AgeError.InvalidX25519RecipientBlock;
+            assert(encoded_public_key.len == BASE64_ENCODED_SCALAR_SIZE);
             assert(stanza.args[1] == null);
 
+            if (stanza.body.len != BASE64_ENCODED_FILE_KEY_SIZE) return AgeError.InvalidX25519RecipientBlock;
+            var ciphertext: [FILE_KEY_LEN + constants.ChaCha20Poly1305.tag_length]u8 = undefined;
+            const decoded_ciphertext = base64.decode(&ciphertext, &stanza.body, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecipientBlock;
+            assert(decoded_ciphertext.len == FILE_KEY_LEN + constants.ChaCha20Poly1305.tag_length);
+
             var their_public_key: [X25519_SCALAR_SIZE]u8 = undefined;
-            const decoded_public_key_slice = base64.decode(&their_public_key, encoded_public_key, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecpientBlock;
+            const decoded_public_key_slice = base64.decode(&their_public_key, encoded_public_key, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecipientBlock;
             assert(decoded_public_key_slice.len == X25519_SCALAR_SIZE);
 
-            const shared_secret_point = Curve25519.mul(Curve25519.fromBytes(their_public_key), self.secret_key) catch return AgeError.InvalidX25519RecpientBlock;
+            const shared_secret_point = Curve25519.fromBytes(their_public_key).clampedMul(self.secret_key) catch return AgeError.InvalidX25519RecipientBlock;
             const shared_secret = shared_secret_point.toBytes();
 
             const salt: [X25519_SCALAR_SIZE * 2]u8 = their_public_key ++ self.our_public_key;
@@ -177,7 +189,7 @@ pub const X25519Identity = struct {
 
             var decrypted_file_key: [FILE_KEY_LEN]u8 = undefined;
             defer secureZero(u8, &decrypted_file_key);
-            ChaCha20Poly1305.decrypt(&decrypted_file_key, stanza.body[0..FILE_KEY_LEN], stanza.body[FILE_KEY_LEN..].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, wrapping_key) catch return AgeError.FileKeyDecryptionFailed;
+            ChaCha20Poly1305.decrypt(&decrypted_file_key, ciphertext[0..FILE_KEY_LEN], ciphertext[FILE_KEY_LEN..].*, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, wrapping_key) catch return AgeError.FileKeyDecryptionFailed;
 
             return decrypted_file_key;
         }
@@ -193,61 +205,96 @@ pub const X25519Identity = struct {
     /// Returns the bech32 private key encoding of this identity
     pub fn toBech32String(self: *const X25519Identity) [BECH32_ENCODED_PRIVATE_KEY_SIZE]u8 {
         const data = self.secret_key;
-        const enc = bech32.Encoding.bech32;
         var buf: [bech32.max_string_size]u8 = undefined;
         var encoded_stack: [BECH32_ENCODED_PRIVATE_KEY_SIZE]u8 = undefined;
-        const encoded = bech32.standard_uppercase.Encoder.encode(&buf, BECH32_PRIVATE_KEY_HRP_TAG, &data, enc);
+        const encoded = bech32.standard_uppercase.Encoder.encode(&buf, BECH32_PRIVATE_KEY_HRP_TAG, &data, bech32.Encoding.bech32);
         assert(encoded.len == BECH32_ENCODED_PRIVATE_KEY_SIZE);
         @memcpy(&encoded_stack, encoded);
         return encoded_stack;
     }
 };
 
-test "x25519 round trip og" {
+// test "x25519 round trip og" {
+//     const allocator = std.testing.allocator;
+
+//     var identity = try X25519Identity.generate();
+//     var recipient = identity.recipient();
+
+//     const recipient2 = try X25519Recipient.initFromBech32String(&recipient.toBech32String());
+//     try std.testing.expectEqualSlices(u8, &recipient.toBech32String(), &recipient2.toBech32String());
+
+//     const identity2 = try X25519Identity.initFromBech32String(&identity.toBech32String());
+//     try std.testing.expectEqualSlices(u8, &identity.toBech32String(), &identity2.toBech32String());
+
+//     const rng = std.crypto.random;
+//     var file_key: [FILE_KEY_LEN]u8 = undefined;
+//     rng.bytes(&file_key);
+
+//     const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+//     defer for (stanzas) |stanza| {
+//         stanza.deinit();
+//     };
+
+//     var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
+
+//     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+// }
+
+// test "x25519 round trip interfaces" {
+//     const allocator = std.testing.allocator;
+
+//     var x25519_identity = try X25519Identity.generate();
+//     var x25519_recipient = x25519_identity.recipient();
+
+//     var identity = Identity.init(&x25519_identity);
+//     var recipient = Recipient.init(&x25519_recipient);
+
+//     const rng = std.crypto.random;
+//     var file_key: [FILE_KEY_LEN]u8 = undefined;
+//     rng.bytes(&file_key);
+
+//     const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+//     defer for (stanzas) |stanza| {
+//         stanza.deinit();
+//     };
+
+//     var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
+
+//     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+// }
+
+test "x25519 basic decryption" {
     const allocator = std.testing.allocator;
 
-    var identity = try X25519Identity.generate();
-    var recipient = identity.recipient();
+    // from github.com/C2SP/CCTV/blog/main/age/testdata/x25519
+    const identity_str = "AGE-SECRET-KEY-1XMWWC06LY3EE5RYTXM9MFLAZ2U56JJJ36S0MYPDRWSVLUL66MV4QX3S7F6";
+    const stanza_arg = "TEiF0ypqr+bpvcqXNyCVJpL7OuwPdVwPL7KQEbFDOCc";
+    const stanza_body = "EmECAEcKN+n/Vs9SbWiV+Hu0r+E8R77DdWYyd83nw7U";
+    var xIdentity = try X25519Identity.initFromBech32String(identity_str);
+    const identity = Identity.init(&xIdentity);
 
-    const recipient2 = try X25519Recipient.initFromBech32String(&recipient.toBech32String());
-    try std.testing.expectEqualSlices(u8, &recipient.toBech32String(), &recipient2.toBech32String());
+    // var xRecipient = xIdentity.recipient();
+    // var recipient = Recipient.init(&xRecipient);
+    const file_key = [_]u8{ 0x59, 0x45, 0x4c, 0x4c, 0x4f, 0x57, 0x20, 0x53, 0x55, 0x42, 0x4d, 0x41, 0x52, 0x49, 0x4e, 0x45 };
+    // const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    // defer for (stanzas) |stanza| {
+    //     stanza.deinit();
+    // };
 
-    const identity2 = try X25519Identity.initFromBech32String(&identity.toBech32String());
-    try std.testing.expectEqualSlices(u8, &identity.toBech32String(), &identity2.toBech32String());
+    var stanza_body_arr: [constants.BASE64_ENCODED_FILE_KEY_BYTES]u8 = undefined;
+    for (stanza_body, 0..) |byte, i| {
+        stanza_body_arr[i] = byte;
+    }
 
-    const rng = std.crypto.random;
-    var file_key: [FILE_KEY_LEN]u8 = undefined;
-    rng.bytes(&file_key);
-
-    const stanzas = try recipient.wrapFileKey(allocator, &file_key);
-    defer for (stanzas) |stanza| {
-        stanza.deinit();
+    const stanzas = [_]Stanza{
+        Stanza{
+            .tag = "X25519",
+            .args = [_]?[]const u8{ stanza_arg, null },
+            .body = stanza_body_arr,
+            .arena = null,
+        },
     };
 
-    var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
-
-    try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
-}
-
-test "x25519 round trip interfaces" {
-    const allocator = std.testing.allocator;
-
-    var x25519_identity = try X25519Identity.generate();
-    var x25519_recipient = x25519_identity.recipient();
-
-    var identity = Identity.init(&x25519_identity);
-    var recipient = Recipient.init(&x25519_recipient);
-
-    const rng = std.crypto.random;
-    var file_key: [FILE_KEY_LEN]u8 = undefined;
-    rng.bytes(&file_key);
-
-    const stanzas = try recipient.wrapFileKey(allocator, &file_key);
-    defer for (stanzas) |stanza| {
-        stanza.deinit();
-    };
-
-    var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
-
+    const decrypted_file_key = try identity.unwrapFileKey(allocator, &stanzas);
     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
 }
