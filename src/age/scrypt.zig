@@ -8,9 +8,9 @@ const secureZero = std.crypto.secureZero;
 const AgeError = @import("errors.zig").AgeError;
 const Allocator = std.mem.Allocator;
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
-const Identity = @import("Identity.zig");
-const Recipient = @import("Recipient.zig");
-const Stanza = @import("Stanza.zig");
+const Identity = @import("Identity.zig").Identity;
+const Recipient = @import("Recipient.zig").Recipient;
+const Stanza = @import("Stanza.zig").Stanza;
 
 const SALT_SIZE = 16;
 // const leftover = SALT_SIZE % 3;

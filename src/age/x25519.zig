@@ -214,54 +214,54 @@ pub const X25519Identity = struct {
     }
 };
 
-// test "x25519 round trip og" {
-//     const allocator = std.testing.allocator;
+test "x25519 round trip og" {
+    const allocator = std.testing.allocator;
 
-//     var identity = try X25519Identity.generate();
-//     var recipient = identity.recipient();
+    var identity = try X25519Identity.generate();
+    var recipient = identity.recipient();
 
-//     const recipient2 = try X25519Recipient.initFromBech32String(&recipient.toBech32String());
-//     try std.testing.expectEqualSlices(u8, &recipient.toBech32String(), &recipient2.toBech32String());
+    const recipient2 = try X25519Recipient.initFromBech32String(&recipient.toBech32String());
+    try std.testing.expectEqualSlices(u8, &recipient.toBech32String(), &recipient2.toBech32String());
 
-//     const identity2 = try X25519Identity.initFromBech32String(&identity.toBech32String());
-//     try std.testing.expectEqualSlices(u8, &identity.toBech32String(), &identity2.toBech32String());
+    const identity2 = try X25519Identity.initFromBech32String(&identity.toBech32String());
+    try std.testing.expectEqualSlices(u8, &identity.toBech32String(), &identity2.toBech32String());
 
-//     const rng = std.crypto.random;
-//     var file_key: [FILE_KEY_LEN]u8 = undefined;
-//     rng.bytes(&file_key);
+    const rng = std.crypto.random;
+    var file_key: [FILE_KEY_LEN]u8 = undefined;
+    rng.bytes(&file_key);
 
-//     const stanzas = try recipient.wrapFileKey(allocator, &file_key);
-//     defer for (stanzas) |stanza| {
-//         stanza.deinit();
-//     };
+    const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    defer for (stanzas) |stanza| {
+        stanza.deinit();
+    };
 
-//     var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
+    var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
 
-//     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
-// }
+    try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+}
 
-// test "x25519 round trip interfaces" {
-//     const allocator = std.testing.allocator;
+test "x25519 round trip interfaces" {
+    const allocator = std.testing.allocator;
 
-//     var x25519_identity = try X25519Identity.generate();
-//     var x25519_recipient = x25519_identity.recipient();
+    var x25519_identity = try X25519Identity.generate();
+    var x25519_recipient = x25519_identity.recipient();
 
-//     var identity = Identity.init(&x25519_identity);
-//     var recipient = Recipient.init(&x25519_recipient);
+    var identity = Identity.init(&x25519_identity);
+    var recipient = Recipient.init(&x25519_recipient);
 
-//     const rng = std.crypto.random;
-//     var file_key: [FILE_KEY_LEN]u8 = undefined;
-//     rng.bytes(&file_key);
+    const rng = std.crypto.random;
+    var file_key: [FILE_KEY_LEN]u8 = undefined;
+    rng.bytes(&file_key);
 
-//     const stanzas = try recipient.wrapFileKey(allocator, &file_key);
-//     defer for (stanzas) |stanza| {
-//         stanza.deinit();
-//     };
+    const stanzas = try recipient.wrapFileKey(allocator, &file_key);
+    defer for (stanzas) |stanza| {
+        stanza.deinit();
+    };
 
-//     var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
+    var decrypted_file_key = try identity.unwrapFileKey(allocator, stanzas);
 
-//     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
-// }
+    try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+}
 
 test "x25519 basic decryption" {
     const allocator = std.testing.allocator;
