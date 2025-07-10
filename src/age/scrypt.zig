@@ -6,6 +6,7 @@ const scrypt = std.crypto.pwhash.scrypt;
 const base64 = std.crypto.codecs.base64;
 
 const AgeError = @import("errors.zig").AgeError;
+const ArrayListAlignedUnmanaged = std.ArrayListAlignedUnmanaged;
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 const Identity = @import("Identity.zig").Identity;
 const Recipient = @import("Recipient.zig").Recipient;
@@ -50,7 +51,7 @@ pub const ScryptRecipient = struct {
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
 
-        const rng = std.crypto.random;
+        const rng = crypto.random;
         var salt: [salt_length]u8 = undefined;
         rng.bytes(&salt);
 
@@ -70,6 +71,7 @@ pub const ScryptRecipient = struct {
         ChaCha20Poly1305.encrypt(&encrypted_file_key, &tag, file_key, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, key);
 
         var buffer = arena_allocator.alignedAlloc(u8, .@"16", self.getBufferSize()) catch return AgeError.OutOfMemory;
+        errdefer arena_allocator.free(buffer);
         const encoded_salt = base64.encode(buffer[0..encoded_salt_length], salt[0..], base64.Variant.standard_nopad) catch unreachable;
         // start log_n_str at 32 so accesses are 16 and 32 byte aligned
         const log_n_str = std.fmt.bufPrint(buffer[32..], "{}", .{self.log_n}) catch unreachable;
@@ -79,7 +81,7 @@ pub const ScryptRecipient = struct {
         const our_encrypted_file_key_encoded = base64.encode(&encoded_file_key, &ciphertext, base64.Variant.standard_nopad) catch unreachable;
         assert(our_encrypted_file_key_encoded.len == Stanza.body_length);
 
-        var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
+        var stanzas = try ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
         try stanzas.append(arena_allocator, .{
             .tag = label,
             .args = .{ encoded_salt, log_n_str },
@@ -104,7 +106,7 @@ pub const ScryptRecipient = struct {
     fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: mem.Allocator, file_key: []const u8) AgeError!.{ []Stanza, [][]const u8 } {
         const stanzas = try self.wrapFileKey(allocator, file_key);
 
-        const rng = std.crypto.random;
+        const rng = crypto.random;
         var random: [16]u8 = undefined;
         rng.bytes(&random);
 
@@ -137,7 +139,7 @@ pub const ScryptIdentity = struct {
     fn unwrapFileKey(self: *ScryptIdentity, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
         assert(stanzas.len > 0);
         for (stanzas) |stanza| {
-            if (!std.mem.eql(u8, stanza.tag, ScryptRecipient.label)) continue;
+            if (!mem.eql(u8, stanza.tag, ScryptRecipient.label)) continue;
 
             assert(stanza.args.len == 2);
             if (stanza.body.len != Stanza.body_length) return AgeError.InvalidScryptRecipientBlock;

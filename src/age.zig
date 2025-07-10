@@ -11,9 +11,11 @@ test {
     _ = @import("age/scrypt.zig");
     _ = @import("age/x25519.zig");
     _ = @import("age/internal/bech32.zig");
+    _ = @import("age/internal/stream.zig");
 
     std.testing.refAllDecls(@This());
     std.testing.refAllDecls(@import("age/scrypt.zig"));
     std.testing.refAllDecls(@import("age/x25519.zig"));
     std.testing.refAllDecls(@import("age/internal/bech32.zig"));
+    std.testing.refAllDecls(@import("age/internal/stream.zig"));
 }

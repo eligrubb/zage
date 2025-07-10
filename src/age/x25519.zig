@@ -44,7 +44,7 @@ pub const X25519Recipient = struct {
         assert(bech32_string.len == bech32_encoded_key_length);
         var buf: [bech32.max_data_size]u8 = undefined;
         const decoded = bech32.standard.Decoder.decode(&buf, bech32_string) catch return AgeError.InvalidBech32String;
-        if (!std.mem.eql(u8, decoded.hrp, bech32_public_hrp)) return AgeError.InvalidBech32String;
+        if (!mem.eql(u8, decoded.hrp, bech32_public_hrp)) return AgeError.InvalidBech32String;
         if (decoded.data.len != scalar_length) return AgeError.InvalidBech32String;
         if (decoded.encoding != bech32.Encoding.bech32) return AgeError.InvalidBech32String;
 
@@ -62,7 +62,7 @@ pub const X25519Recipient = struct {
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
 
-        const rng = std.crypto.random;
+        const rng = crypto.random;
         var ephemeral: [scalar_length]u8 = undefined;
         rng.bytes(&ephemeral);
 
@@ -81,6 +81,7 @@ pub const X25519Recipient = struct {
         ChaCha20Poly1305.encrypt(&encrypted_file_key, &tag, file_key, &[_]u8{}, [_]u8{0} ** ChaCha20Poly1305.nonce_length, wrapping_key);
 
         var buffer = arena_allocator.alignedAlloc(u8, .@"16", base64_encoded_scalar_length) catch return AgeError.OutOfMemory;
+        errdefer arena_allocator.free(buffer);
         const our_public_key_encoded = base64.encode(buffer[0..base64_encoded_scalar_length], &our_public_key, base64.Variant.standard_nopad) catch unreachable;
         assert(our_public_key_encoded.len == base64_encoded_scalar_length);
 
@@ -89,7 +90,7 @@ pub const X25519Recipient = struct {
         const our_encrypted_file_key_encoded = base64.encode(&encoded_file_key, &ciphertext, base64.Variant.standard_nopad) catch unreachable;
         assert(our_encrypted_file_key_encoded.len == Stanza.body_length);
 
-        var stanzas = try std.ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
+        var stanzas = try ArrayListAlignedUnmanaged(Stanza, .@"8").initCapacity(arena_allocator, 1);
         try stanzas.append(arena_allocator, .{
             .tag = label,
             .args = .{ our_public_key_encoded, null },
@@ -153,7 +154,7 @@ pub const X25519Identity = struct {
         assert(private_key.len == bech32_encoded_key_length);
         var buf: [bech32.max_data_size]u8 = undefined;
         const decoded = bech32.standard_uppercase.Decoder.decode(&buf, private_key) catch return AgeError.InvalidBech32String;
-        if (!std.mem.eql(u8, decoded.hrp, bech32_private_hrp)) return AgeError.InvalidBech32String;
+        if (!mem.eql(u8, decoded.hrp, bech32_private_hrp)) return AgeError.InvalidBech32String;
         if (decoded.data.len != scalar_length) return AgeError.InvalidBech32String;
         if (decoded.encoding != bech32.Encoding.bech32) return AgeError.InvalidBech32String;
 
@@ -162,7 +163,7 @@ pub const X25519Identity = struct {
 
     /// Randomly generates a new X25519Identity
     pub fn generate() AgeError!X25519Identity {
-        const rng = std.crypto.random;
+        const rng = crypto.random;
         var secret_key: [scalar_length]u8 = undefined;
 
         while (true) {
@@ -178,7 +179,7 @@ pub const X25519Identity = struct {
         assert(stanzas.len > 0);
         _ = allocator;
         for (stanzas) |stanza| {
-            if (!std.mem.eql(u8, stanza.tag, X25519Recipient.label)) continue;
+            if (!mem.eql(u8, stanza.tag, X25519Recipient.label)) continue;
 
             assert(stanza.args.len == 2);
             const encoded_public_key = stanza.args[0] orelse return AgeError.InvalidX25519RecipientBlock;
