@@ -2,3 +2,4 @@ zig-out/
 .zig-cache/
 *.psd
 .DS_Store
+*.local.md
