@@ -9,11 +9,12 @@ const AgeError = @import("errors.zig").AgeError;
 const Allocator = std.mem.Allocator;
 const ArrayListAlignedUnmanaged = std.ArrayListAlignedUnmanaged;
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
-const Curve25519 = std.crypto.ecc.Curve25519;
+// const Curve25519 = std.crypto.ecc.Curve25519;
 const HkdfSha256 = std.crypto.kdf.hkdf.HkdfSha256;
 const Identity = @import("Identity.zig").Identity;
 const Recipient = @import("Recipient.zig").Recipient;
 const Stanza = @import("Stanza.zig").Stanza;
+const X25519 = std.crypto.dh.X25519;
 
 const FILE_KEY_LEN = constants.FILE_KEY_BYTES;
 const X25519_SCALAR_SIZE = constants.X25519_SCALAR_BYTES;
@@ -32,6 +33,8 @@ const BECH32_ENCODED_PRIVATE_KEY_SIZE = BECH32_PRIVATE_KEY_HRP_TAG.len + 1 + 52 
 
 pub const X25519Recipient = struct {
     their_public_key: [X25519_SCALAR_SIZE]u8 = undefined,
+
+    pub const base_point_bytes = X25519.Curve.basePoint.toBytes();
 
     pub fn initFromPoint(public_key: []const u8) AgeError!X25519Recipient {
         assert(public_key.len == X25519_SCALAR_SIZE);
@@ -70,13 +73,12 @@ pub const X25519Recipient = struct {
         var ephemeral: [X25519_SCALAR_SIZE]u8 = undefined;
         rng.bytes(&ephemeral);
 
-        const our_public_key_point = Curve25519.basePoint.clampedMul(ephemeral) catch unreachable;
-        const our_public_key = our_public_key_point.toBytes();
-        const shared_secret = Curve25519.fromBytes(self.their_public_key).clampedMul(ephemeral) catch unreachable;
+        const our_public_key = X25519.scalarmult(ephemeral, base_point_bytes) catch unreachable;
+        const shared_secret = X25519.scalarmult(ephemeral, self.their_public_key) catch unreachable;
 
         const salt: [X25519_SCALAR_SIZE * 2]u8 = our_public_key ++ self.their_public_key;
         const kdf = HkdfSha256;
-        const prk = kdf.extract(&salt, &shared_secret.toBytes());
+        const prk = kdf.extract(&salt, &shared_secret);
         var wrapping_key: [CHACHA20POLY1305_KEY_SIZE]u8 = undefined;
         defer secureZero(u8, &wrapping_key);
         kdf.expand(&wrapping_key, X25519_LABEL, prk);
@@ -126,12 +128,11 @@ pub const X25519Identity = struct {
         assert(secret_key.len == X25519_SCALAR_SIZE);
         var our_secret_key: [X25519_SCALAR_SIZE]u8 = undefined;
         @memcpy(&our_secret_key, secret_key);
-
-        const our_public_key = Curve25519.basePoint.clampedMul(our_secret_key) catch return AgeError.IncorrectKeyLength;
+        const our_public_key = try X25519.recoverPublicKey(our_secret_key);
 
         return .{
             .secret_key = our_secret_key,
-            .our_public_key = our_public_key.toBytes(),
+            .our_public_key = our_public_key,
         };
     }
 
@@ -152,9 +153,14 @@ pub const X25519Identity = struct {
     pub fn generate() AgeError!X25519Identity {
         const rng = std.crypto.random;
         var secret_key: [X25519_SCALAR_SIZE]u8 = undefined;
-        rng.bytes(&secret_key);
 
-        return initFromScalar(&secret_key);
+        while (true) {
+            rng.bytes(&secret_key);
+            return initFromScalar(&secret_key) catch {
+                @branchHint(.unlikely);
+                continue;
+            };
+        }
     }
 
     pub fn unwrapFileKey(self: *X25519Identity, allocator: Allocator, stanzas: []const Stanza) AgeError![FILE_KEY_LEN]u8 {
@@ -177,8 +183,7 @@ pub const X25519Identity = struct {
             const decoded_public_key_slice = base64.decode(&their_public_key, encoded_public_key, base64.Variant.standard_nopad) catch return AgeError.InvalidX25519RecipientBlock;
             assert(decoded_public_key_slice.len == X25519_SCALAR_SIZE);
 
-            const shared_secret_point = Curve25519.fromBytes(their_public_key).clampedMul(self.secret_key) catch return AgeError.InvalidX25519RecipientBlock;
-            const shared_secret = shared_secret_point.toBytes();
+            const shared_secret = X25519.scalarmult(self.secret_key, their_public_key) catch return AgeError.InvalidX25519RecipientBlock;
 
             const salt: [X25519_SCALAR_SIZE * 2]u8 = their_public_key ++ self.our_public_key;
             const kdf = HkdfSha256;

@@ -1,5 +1,6 @@
 pub const AgeError = error{
     FileKeyDecryptionFailed,
+    IdentityElement,
     IncorrectIdentity,
     IncorrectKeyLength,
     InvalidBech32String,
