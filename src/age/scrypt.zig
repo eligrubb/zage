@@ -37,7 +37,7 @@ pub const ScryptRecipient = struct {
         self.log_n = @truncate(work_factor);
     }
 
-    inline fn getBufferSize(self: *const ScryptRecipient) usize {
+    fn getBufferSize(self: *const ScryptRecipient) usize {
         var buf: [10]u8 = undefined;
         const log_n_str = std.fmt.bufPrint(&buf, "{}", .{self.log_n}) catch unreachable;
         // return some padding so accessing log_n_str is 32 and 16 byte aligned
@@ -45,7 +45,7 @@ pub const ScryptRecipient = struct {
     }
 
     /// Call Stanza.deinit for each stanza in []Stanza
-    pub fn wrapFileKey(self: *ScryptRecipient, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
+    fn wrapFileKey(self: *ScryptRecipient, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
         assert(file_key.len == Identity.file_key_length);
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
@@ -89,6 +89,18 @@ pub const ScryptRecipient = struct {
         return stanzas.toOwnedSlice(arena_allocator);
     }
 
+    pub fn recipient(self: *ScryptRecipient) Recipient {
+        return .{
+            .ptr = self,
+            .wrap = wrap,
+        };
+    }
+
+    fn wrap(ctx: *anyopaque, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
+        const r: *ScryptRecipient = @ptrCast(@alignCast(ctx));
+        return r.wrapFileKey(allocator, file_key);
+    }
+
     fn wrapFileKeyWithLabels(self: *ScryptRecipient, allocator: mem.Allocator, file_key: []const u8) AgeError!.{ []Stanza, [][]const u8 } {
         const stanzas = try self.wrapFileKey(allocator, file_key);
 
@@ -122,7 +134,7 @@ pub const ScryptIdentity = struct {
         self.max_log_n = @truncate(max_work_factor);
     }
 
-    pub fn unwrapFileKey(self: *ScryptIdentity, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
+    fn unwrapFileKey(self: *ScryptIdentity, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
         assert(stanzas.len > 0);
         for (stanzas) |stanza| {
             if (!std.mem.eql(u8, stanza.tag, ScryptRecipient.label)) continue;
@@ -161,6 +173,18 @@ pub const ScryptIdentity = struct {
             return decrypted_file_key;
         }
         return AgeError.IncorrectIdentity;
+    }
+
+    pub fn identity(self: *ScryptIdentity) Identity {
+        return .{
+            .ptr = self,
+            .unwrap = unwrap,
+        };
+    }
+
+    fn unwrap(ctx: *anyopaque, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
+        const i: *ScryptIdentity = @ptrCast(@alignCast(ctx));
+        return i.unwrapFileKey(allocator, stanzas);
     }
 };
 
@@ -209,8 +233,8 @@ test "scrypt round trip interfaces" {
     var scrypt_recipient = ScryptRecipient.init(password);
     scrypt_recipient.setWorkFactor(15);
 
-    var identity = Identity.init(&scrypt_identity);
-    var recipient = Recipient.init(&scrypt_recipient);
+    var identity = scrypt_identity.identity();
+    var recipient = scrypt_recipient.recipient();
 
     //var identity = scrypt_identity.identity();
     //var recipient = scrypt_recipient.recipient();
@@ -238,7 +262,7 @@ test "scrypt basic unwrap" {
     const stanza_body = "gUjEymFKMVXQEKdMMHL24oYexjE3TIC0O0zGSqJ2aUY";
 
     var sIdentity = ScryptIdentity.init(password);
-    const identity = Identity.init(&sIdentity);
+    const identity = sIdentity.identity();
 
     const file_key = [_]u8{ 0x59, 0x45, 0x4c, 0x4c, 0x4f, 0x57, 0x20, 0x53, 0x55, 0x42, 0x4d, 0x41, 0x52, 0x49, 0x4e, 0x45 };
 

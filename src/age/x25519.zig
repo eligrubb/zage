@@ -57,7 +57,7 @@ pub const X25519Recipient = struct {
     }
 
     /// Call Stanza.deinit for each stanza in []Stanza
-    pub fn wrapFileKey(self: *X25519Recipient, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
+    fn wrapFileKey(self: *X25519Recipient, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
         assert(file_key.len > 0);
         var arena = std.heap.ArenaAllocator.init(allocator);
         var arena_allocator = arena.allocator();
@@ -109,6 +109,18 @@ pub const X25519Recipient = struct {
         assert(encoded.len == bech32_encoded_key_length);
         @memcpy(&encoded_stack, encoded);
         return encoded_stack;
+    }
+
+    pub fn recipient(self: *X25519Recipient) Recipient {
+        return .{
+            .ptr = self,
+            .wrap = wrap,
+        };
+    }
+
+    fn wrap(ctx: *anyopaque, allocator: mem.Allocator, file_key: []const u8) AgeError![]Stanza {
+        const r: *X25519Recipient = @ptrCast(@alignCast(ctx));
+        return r.wrapFileKey(allocator, file_key);
     }
 };
 
@@ -206,6 +218,18 @@ pub const X25519Identity = struct {
         };
     }
 
+    pub fn identity(self: *X25519Identity) Identity {
+        return .{
+            .ptr = self,
+            .unwrap = unwrap,
+        };
+    }
+
+    fn unwrap(ctx: *anyopaque, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
+        const i: *X25519Identity = @ptrCast(@alignCast(ctx));
+        return i.unwrapFileKey(allocator, stanzas);
+    }
+
     /// Returns the bech32 private key encoding of this identity
     pub fn toBech32String(self: *const X25519Identity) [bech32_encoded_key_length]u8 {
         const data = self.secret_key;
@@ -250,8 +274,8 @@ test "x25519 round trip interfaces" {
     var x25519_identity = try X25519Identity.generate();
     var x25519_recipient = x25519_identity.recipient();
 
-    var identity = Identity.init(&x25519_identity);
-    var recipient = Recipient.init(&x25519_recipient);
+    var identity = x25519_identity.identity();
+    var recipient = x25519_recipient.recipient();
 
     const rng = std.crypto.random;
     var file_key: [Identity.file_key_length]u8 = undefined;
@@ -275,7 +299,7 @@ test "x25519 basic decryption" {
     const stanza_arg = "TEiF0ypqr+bpvcqXNyCVJpL7OuwPdVwPL7KQEbFDOCc";
     const stanza_body = "EmECAEcKN+n/Vs9SbWiV+Hu0r+E8R77DdWYyd83nw7U";
     var xIdentity = try X25519Identity.initFromBech32String(identity_str);
-    const identity = Identity.init(&xIdentity);
+    const identity = xIdentity.identity();
 
     // var xRecipient = xIdentity.recipient();
     // var recipient = Recipient.init(&xRecipient);
