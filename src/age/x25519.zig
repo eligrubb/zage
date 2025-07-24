@@ -174,7 +174,7 @@ pub const X25519Identity = struct {
         }
     }
 
-    pub fn unwrapFileKey(self: *X25519Identity, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
+    fn unwrapFileKey(self: *X25519Identity, allocator: mem.Allocator, stanzas: []const Stanza) AgeError![file_key_length]u8 {
         assert(stanzas.len > 0);
         _ = allocator;
         for (stanzas) |stanza| {
