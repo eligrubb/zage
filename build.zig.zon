@@ -1,6 +1,12 @@
 .{
     .name = .zage,
     .version = "0.1.0",
+    .dependencies = .{
+        .zecrecy = .{
+            .url = "git+https://github.com/eligrubb/zecrecy.git#ddae97058db2edc62bc1583dc2d11a23d3f8a2b7",
+            .hash = "zecrecy-0.1.0-IHpEiYnMAADMjhtimVHiHY7spezyCgv0VAMXWnFdfhjS",
+        },
+    },
     .fingerprint = 0x7bb75644516747d0,
     .minimum_zig_version = "0.15.0-dev.1034+bd97b6618",
     .paths = .{

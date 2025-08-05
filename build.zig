@@ -13,6 +13,11 @@ pub fn build(b: *std.Build) !void {
     const bech32_mod = b.addModule("bech32", .{ .root_source_file = b.path("src/age/internal/bech32.zig") });
     age_mod.addImport("bech32", bech32_mod);
 
+    const zecrecy_mod = b.dependency("zecrecy", .{
+        .target = target,
+    });
+    age_mod.addImport("zecrecy", zecrecy_mod.module("zecrecy"));
+
     // const bech32 = b.dependency("bech32", .{});
     // mod.addImport("bech32", bech32.module("bech32"));
 
@@ -29,6 +34,9 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/age.zig"),
             .target = target,
+            .imports = &.{
+                .{ .name = "zecrecy", .module = zecrecy_mod.module("zecrecy") },
+            },
         }),
     });
 
@@ -45,6 +53,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     zage_tests.root_module.addImport("age", age_mod);
+    // age_tests.root_module.addImport("zecrecy", zecrecy_mod.module("zecrecy"));
 
     const zage_tests_run = b.addRunArtifact(zage_tests);
     const age_tests_run = b.addRunArtifact(age_tests);
