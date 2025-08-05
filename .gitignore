@@ -1,5 +1,8 @@
 zig-out/
 .zig-cache/
+AGENT.md
+AGENTS.md
+CLAUDE.md
 *.psd
 .DS_Store
 *.local.md
