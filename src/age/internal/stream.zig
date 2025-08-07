@@ -8,112 +8,158 @@ const assert = std.debug.assert;
 const zecrecy = @import("zecrecy");
 
 const File = std.fs.File;
-const Writer = std.Io.Writer;
-const Reader = std.Io.Reader;
+const Io = std.Io;
+const Reader = Io.Reader;
+const Writer = Io.Writer;
+const Limit = Io.Limit;
 const ChaCha20Poly1305 = crypto.aead.chacha_poly.ChaCha20Poly1305;
 const SecretString = zecrecy.SecretString;
 
 pub const chunk_size = 64 * 1024;
 pub const enc_chunk_size = chunk_size + ChaCha20Poly1305.tag_length;
 
-/// STREAMEncrypting is an `Io.Writer` that encrypts chunks of data using
-/// the STREAM variant[^1] described in the age specification.
-/// The result to the out `Io.Writer` interface.
+/// STREAMEncrypting is an `Io.Writer` that encrypts chunks of data using the
+/// STREAM variant[^1] described in the age specification. The result is
+/// written to the `Io.Writer` sink.
 ///
 /// [^1]: https://eprint.iacr.org/2015/189
 pub const STREAMEncrypting = struct {
     /// ChaCha20Poly1305 key for aead file encryption
-    key: [ChaCha20Poly1305.key_length]u8,
-    /// destination io.AnyWriter interface
-    parent_writer: *Writer,
-    /// backing data for the writer's buffer
-    chunk_data: [enc_chunk_size]u8,
-    /// nonce with the following format:
-    nonce: [ChaCha20Poly1305.nonce_length]u8,
-    writer: Writer,
+    key: zecrecy.Secret(u8),
+    /// source Io.Reader
+    source: *Io.Reader,
+    /// STREAMEncrypting Reader interface
+    reader: Io.Reader,
+    /// 12-byte nonce with special format:
+    /// first 11 bytes are a big endian counter that increases with each
+    /// message chunk.
+    /// The last byte should always be `0x00`, unless the final message chunk
+    /// is being encrypted.
+    nonce: [ChaCha20Poly1305.nonce_length]u8 = [_]u8{0} ** ChaCha20Poly1305.nonce_length,
+    last_chunk: bool = false,
 
-    pub fn init(parent: *Writer, key: [ChaCha20Poly1305.key_length]u8) @This() {
+    pub fn init(source: *Io.Reader, key: zecrecy.Secret(u8)) @This() {
         return .{
             .key = key,
-            .parent_writer = parent,
-            .chunk_data = [_]u8{0} ** enc_chunk_size,
-            .nonce = [_]u8{0} ** ChaCha20Poly1305.nonce_length,
-            .writer = .{
-                // slice of encrypted but unwritten data backed by chunk_data
+            .source = source,
+            .reader = .{
+                // slice of unencrypted and unwritten data
                 .buffer = undefined,
+                .seek = 0,
+                .end = 0,
                 .vtable = &.{
-                    .drain = @This().drain,
-                    // .sendFile = @This().sendFile, TODO: determine if we need this
-                    // .flush = @This().flush, TODO: determine if we need this
+                    .stream = @This().stream,
+                    // .drain = @This().drain,
+                    // .readVec = @This().readVec,
+                    // .rebase = @This().rebase,
                 },
             },
         };
     }
 
-    /// Sends bytes to the logical sink. A write will only be sent here if it
-    /// could not fit into `buffer`, or during a `flush` operation.
+    /// Writes the final chunk of the encrypted file.
     ///
-    /// `buffer[0..end]` is consumed first, followed by each slice of `data` in
-    /// order. Elements of `data` may alias each other but may not alias
-    /// `buffer`.
-    ///
-    /// This function modifies `Writer.end` and `Writer.buffer` in an
-    /// implementation-defined manner.
-    ///
-    /// `data.len` must be nonzero.
-    ///
-    /// The last element of `data` is repeated as necessary so that it is
-    /// written `splat` number of times, which may be zero.
-    ///
-    /// This function may not be called if the data to be written could have
-    /// been stored in `buffer` instead, including when the amount of data to
-    /// be written is zero and the buffer capacity is zero.
-    ///
-    /// Number of bytes consumed from `data` is returned, excluding bytes from
-    /// `buffer`.
-    ///
-    /// Number of bytes returned may be zero, which does not indicate stream
-    /// end. A subsequent call may return nonzero, or signal end of stream via
-    /// `error.WriteFailed`.
-    fn drain(w: *Writer, data: []const []const u8, splat: usize) Writer.Error!usize {
-        assert(data.len > 0);
-        _ = splat;
+    /// **IMPORTANT**: You *must* call this function to finish an encryption.
+    /// Failure to appropriately call this function will result in a malformed,
+    /// truncated ciphertext.
+    pub fn finish(self: *STREAMEncrypting) void {
+        self.last_chunk = true;
+        self.flush();
+    }
 
-        const s: *STREAMEncrypting = @fieldParentPtr("writer", w);
-        _ = s;
+    /// Writes bytes from the internally tracked logical position to `w`.
+    ///
+    /// Returns the number of bytes written, which will be at minimum `0` and
+    /// at most `limit`. The number returned, including zero, does not indicate
+    /// end of stream.
+    ///
+    /// The reader's internal logical seek position moves forward in accordance
+    /// with the number of bytes returned from this function.
+    ///
+    /// Implementations are encouraged to utilize mandatory minimum buffer
+    /// sizes combined with short reads (returning a value less than `limit`)
+    /// in order to minimize complexity.
+    ///
+    /// Although this function is usually called when `buffer` is empty, it is
+    /// also called when it needs to be filled more due to the API user
+    /// requesting contiguous memory. In either case, the existing buffer data
+    /// should be ignored; new data written to `w`.
+    ///
+    /// In addition to, or instead of writing to `w`, the implementation may
+    /// choose to store data in `buffer`, modifying `seek` and `end`
+    /// accordingly. Implementations are encouraged to take advantage of
+    /// this if it simplifies the logic.
+    fn stream(r: *Reader, w: *Writer, limit: Limit) Reader.StreamError!usize {
+        _ = r;
+        _ = w;
+        _ = limit;
         @panic("not implemented");
     }
 
-    // /// Copies contents from an open file to the logical sink. `buffer[0..end]`
-    // /// is consumed first, followed by `limit` bytes from `file_reader`.
-    // ///
-    // /// Number of bytes logically written is returned. This excludes bytes from
-    // /// `buffer` because they have already been logically written. Number of
-    // /// bytes consumed from `buffer` are tracked by modifying `end`.
-    // ///
-    // /// Number of bytes returned may be zero, which does not indicate stream
-    // /// end. A subsequent call may return nonzero, or signal end of stream via
-    // /// `error.WriteFailed`. Caller may check `file_reader` state
-    // /// (`File.Reader.atEnd`) to disambiguate between a zero-length read or
-    // /// write, and whether the file reached the end.
-    // ///
-    // /// `error.Unimplemented` indicates the callee cannot offer a more
-    // /// efficient implementation than the caller performing its own reads.
-    // fn sendFile(w: *Writer, file_reader: *File.Reader, limit: std.io.Limit) Writer.FileError!usize {
-    //     const s: *STREAMEncrypting = @fieldParentPtr("writer", w);
-    // }
+    /// Consumes bytes from the internally tracked stream position without
+    /// providing access to them.
+    ///
+    /// Returns the number of bytes discarded, which will be at minimum `0` and
+    /// at most `limit`. The number of bytes returned, including zero, does not
+    /// indicate end of stream.
+    ///
+    /// The reader's internal logical seek position moves forward in accordance
+    /// with the number of bytes returned from this function.
+    ///
+    /// Implementations are encouraged to utilize mandatory minimum buffer
+    /// sizes combined with short reads (returning a value less than `limit`)
+    /// in order to minimize complexity.
+    ///
+    /// The default implementation is is based on calling `stream`, borrowing
+    /// `buffer` to construct a temporary `Writer` and ignoring the written
+    /// data.
+    ///
+    /// This function is only called when `buffer` is empty.
+    fn discard(r: *Reader, limit: Limit) Reader.Error!usize { // = defaultDiscard,
+        _ = r;
+        _ = limit;
+        @panic("not implemented");
+    }
 
-    // /// Consumes all remaining buffer.
-    // ///
-    // /// The default flush implementation calls drain repeatedly until `end` is
-    // /// zero, however it is legal for implementations to manage `end`
-    // /// differently. For instance, `Allocating` flush is a no-op.
-    // ///
-    // /// There may be subsequent calls to `drain` and `sendFile` after a `flush`
-    // /// operation.
-    // fn flush(w: *Writer) Writer.Error!usize {
-    //     const s: *STREAMEncrypting = @fieldParentPtr("writer", w);
-    // }
+    /// Returns number of bytes written to `data`.
+    ///
+    /// `data` must have nonzero length. `data[0]` may have zero length, in
+    /// which case the implementation must write to `Reader.buffer`.
+    ///
+    /// `data` may not contain an alias to `Reader.buffer`.
+    ///
+    /// `data` is mutable because the implementation may temporarily modify the
+    /// fields in order to handle partial reads. Implementations must restore
+    /// the original value before returning.
+    ///
+    /// Implementations may ignore `data`, writing directly to `Reader.buffer`,
+    /// modifying `seek` and `end` accordingly, and returning 0 from this
+    /// function. Implementations are encouraged to take advantage of this if
+    /// it simplifies the logic.
+    ///
+    /// The default implementation calls `stream` with either `data[0]` or
+    /// `Reader.buffer`, whichever is bigger.
+    fn readVec(r: *Reader, data: [][]u8) Reader.Error!usize { //= defaultReadVec,
+        _ = r;
+        _ = data;
+        @panic("not implemented");
+    }
+
+    /// Ensures `capacity` data can be buffered without rebasing.
+    ///
+    /// Asserts `capacity` is within buffer capacity, or that the stream ends
+    /// within `capacity` bytes.
+    ///
+    /// Only called when `capacity` cannot be satisfied by unused capacity of
+    /// `buffer`.
+    ///
+    /// The default implementation moves buffered data to the start of
+    /// `buffer`, setting `seek` to zero, and cannot fail.
+    fn rebase(r: *Reader, capacity: usize) Reader.RebaseError!void { //= defaultRebase,
+        _ = r;
+        _ = capacity;
+        @panic("not implemented");
+    }
 };
 
 /// STREAMDecrypting is an `io.AnyReader` that decrypts chunks of data using
@@ -124,20 +170,25 @@ pub const STREAMEncrypting = struct {
 pub const STREAMDecrypting = struct {
     /// ChaCha20Poly1305 key for aead file decryption
     key: [ChaCha20Poly1305.key_length]u8,
-    /// source io.AnyReader interface
-    parent_reader: *Reader,
+    /// source Io.AnyReader interface
+    parent_reader: *Io.Reader,
     /// slice of decrypted but unread data backed by buffer
     chunk_data: [enc_chunk_size]u8,
-    /// nonce with the following format:
-    nonce: [ChaCha20Poly1305.nonce_length]u8,
-    reader: Reader,
+    /// STREAMDecrypting Reader interface
+    reader: Io.Reader,
+    /// 12-byte nonce with special format:
+    /// first 11 bytes are a big endian counter that increases with each
+    /// message chunk.
+    /// The last byte should always be `0x00`, unless the final message chunk
+    /// is being decrypted.
+    nonce: [ChaCha20Poly1305.nonce_length]u8 = [_]u8{0} ** ChaCha20Poly1305.nonce_length,
+    last_chunk: bool = false,
 
-    pub fn init(parent: *Reader, key: [ChaCha20Poly1305.key_length]u8) @This() {
+    pub fn init(parent: *Io.Reader, key: [ChaCha20Poly1305.key_length]u8) @This() {
         return .{
             .key = key,
             .parent_reader = parent,
             .chunk_data = [_]u8{0} ** enc_chunk_size,
-            .nonce = [_]u8{0} ** ChaCha20Poly1305.nonce_length,
             .reader = .{
                 // slice of decrypted but unread data backed by chunk_data
                 .buffer = undefined,
@@ -149,16 +200,28 @@ pub const STREAMDecrypting = struct {
         };
     }
 
-    fn stream(r: *Reader, w: *Writer, limit: std.io.Limit) Reader.StreamError!usize {
+    fn stream(r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
         _ = r;
         _ = w;
         _ = limit;
         @panic("not implemented");
     }
 
-    fn discard(r: *Reader, limit: std.io.Limit) Reader.Error!usize {
+    fn discard(r: *Io.Reader, limit: Io.Limit) Io.Reader.Error!usize {
         _ = r;
         _ = limit;
+        @panic("not implemented");
+    }
+
+    fn readVec(r: *Reader, data: [][]u8) Error!usize { //= defaultReadVec,
+        _ = r;
+        _ = data;
+        @panic("not implemented");
+    }
+
+    fn rebase(r: *Reader, capacity: usize) RebaseError!void { //= defaultRebase,
+        _ = r;
+        _ = capacity;
         @panic("not implemented");
     }
 };
@@ -177,12 +240,35 @@ fn incrementNonce(nonce: *[ChaCha20Poly1305.nonce_length]u8) void {
     }
 }
 
-test "increment nonce correctly" {
+test "test basic zecrecy integration" {
     const allocator = std.testing.allocator;
 
     var secret: SecretString = try .init(allocator, "secret");
     defer secret.deinit();
 
-    try std.testing.expect(try zecrecy.eql(secret, "secret"));
-    try std.testing.expect(!(try zecrecy.eql(secret, "secret2")));
+    var secret2: SecretString = try .init(allocator, "secret");
+    defer secret2.deinit();
+
+    var bad_secret: SecretString = try .init(allocator, "s3cret");
+    defer bad_secret.deinit();
+
+    try std.testing.expect(secret.eql(secret2));
+    try std.testing.expect(secret2.eql(secret));
+    try std.testing.expect(!(secret.eql(bad_secret)));
+}
+
+test "test incrementNonce" {
+    var nonce = [_]u8{0} ** ChaCha20Poly1305.nonce_length;
+    incrementNonce(&nonce);
+    try std.testing.expectEqualSlices(u8, &nonce, &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 });
+    incrementNonce(&nonce);
+    try std.testing.expectEqualSlices(u8, &nonce, &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0 });
+
+    nonce = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 17 };
+    incrementNonce(&nonce);
+    try std.testing.expectEqualSlices(u8, &nonce, &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0x11 });
+
+    nonce = [_]u8{ 254, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0 };
+    incrementNonce(&nonce);
+    try std.testing.expectEqualSlices(u8, &nonce, &[_]u8{ 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
 }

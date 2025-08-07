@@ -2,21 +2,24 @@
     <picture>
         <source media="(prefers-color-scheme: dark)" srcset="./assets/img/zage-logo-white.png">
         <source media="(prefers-color-scheme: light)" srcset="./assets/img/zage-logo.png">
-        <img alt="the Zage logo: the age logo (a wireframe of St. Peters dome in Rome, with the text: age, file encryption) with the Ziglang Z spray painted on top." width="600" src="./assets/img/zage-logo.svg"
+        <img alt="the zage logo: the age logo (a wireframe of St. Peters dome in Rome, with the text: age, file encryption) with the Ziglang Z spray painted on top." width="600" src="./assets/img/zage-logo.svg"
     </picture>
 </p>
 
 # zage: age File Encryption with Zig
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Zig Version](https://img.shields.io/badge/Zig-nightly-success.svg)](https://ziglang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-red.svg)](LICENSE)
+![Zig_Version](https://img.shields.io/badge/Zig-nightly-color?logo=zig&color=%23f3ab20)
 [![Go Reference](https://pkg.go.dev/badge/filippo.io/age.svg)](https://pkg.go.dev/filippo.io/age)
-[![C2SP specification](https://img.shields.io/badge/%C2%A7%23-specification-blueviolet)](https://age-encryption.org/v1)
-<!-- [![man page](<https://img.shields.io/badge/age(1)-man%20page-lightgrey>)](https://filippo.io/age/age.1) -->
+[![C2SP_specification](https://img.shields.io/badge/%C2%A7%23-specification-blueviolet)](https://age-encryption.org/v1)
 
-A pure Zig implementation of the [age file encryption standard](https://age-encryption.org/).
+A pure Zig implementation of the [`age` file encryption
+standard](https://age-encryption.org/).
 
-The specification can be found at [age-encryption.org/v1](https://age-encryption.org/v1). age was designed by [@Benjojo](https://benjojo.co.uk/) and [@FiloSottile](https://bsky.app/profile/filippo.abyssdomain.expert).
+The specification can be found at
+[age-encryption.org/v1](https://age-encryption.org/v1). `age` was designed by
+[@Benjojo](https://benjojo.co.uk/) and
+[@FiloSottile](https://bsky.app/profile/filippo.abyssdomain.expert).
 
 example from the primary go library:
 
@@ -28,8 +31,8 @@ $ zage --decrypt -i key.txt data.tar.gz.age > data.tar.gz
 ```
 
 [Like
-age](https://github.com/FiloSottile/age/blob/15153e699f5b7223b8fd573c3d869092b37749eb/README.md?plain=1#L34),
-`zage` is pronounced with a hard *g* sound, like GIF:
+age](https://github.com/FiloSottile/age/blob/15153e699f5b7223b8fd573c3d869092b37749eb/README.md?plain=1#L34)
+and GIF, `zage` is pronounced with a hard *g* sound:
 [`/zɑːgeɪ/`](https://en.wikipedia.org/wiki/Help:IPA/English) or
 [*ZAH-ghay*](https://en.wikipedia.org/wiki/Help:Pronunciation_respelling_key).
 `zage` is always spelled entirely lowercase.
@@ -111,12 +114,20 @@ zig fetch --save ...
 
 - [age](https://filippo.io/age): the original Go implementation
 - [rage](https://github.com/str4d/rage): Rust reference implementation
-- [typage](https://github.com/FiloSottile/typage): official TypeScrypt implementation
-- [awesome-age](https://github.com/FiloSottile/awesome-age): a curated list of age resources, including plugins, tools, integrations, and libraries.
+- [typage](https://github.com/FiloSottile/typage): official TypeScrypt
+implementation
+- [awesome-age](https://github.com/FiloSottile/awesome-age): a curated list of
+age resources, including plugins, tools, integrations, and libraries.
 
 # License and Acknowledgements
 
-This project is licensed under the MIT license. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT license. See the [LICENSE](LICENSE) file
+for details.
 
-The Go implementation of age is licensed under the [BSD 3-Clause License](https://github.com/FiloSottile/age/blob/master/LICENSE).
-The Rust implementation of age is licensed under either [Apache License 2.0](https://github.com/str4d/rage/blob/main/LICENSE-APACHE) or [MIT License](https://github.com/str4d/rage/blob/main/LICENSE-MIT) at your option.
+The Go implementation of age is licensed under the [BSD 3-Clause
+License](https://github.com/FiloSottile/age/blob/master/LICENSE). The Rust
+implementation of age is licensed under either [Apache License
+2.0](https://github.com/str4d/rage/blob/main/LICENSE-APACHE) or [MIT
+License](https://github.com/str4d/rage/blob/main/LICENSE-MIT) at your option.
+The TypeScript implementation of age is licensed under the [BSD 3-Clause
+License](https://github.com/FiloSottile/typage/blob/main/LICENSE)

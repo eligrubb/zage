@@ -1,7 +1,6 @@
 const std = @import("std");
 
-const minimum_build_zig_version = "0.15.0-dev.1034+bd97b6618";
-// Define single semantic version for your library, examples, etc.
+const minimum_build_zig_version = "0.15.1";
 const version = std.SemanticVersion{ .major = 0, .minor = 1, .patch = 0 };
 
 pub fn build(b: *std.Build) !void {
@@ -53,7 +52,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     zage_tests.root_module.addImport("age", age_mod);
-    // age_tests.root_module.addImport("zecrecy", zecrecy_mod.module("zecrecy"));
+    age_tests.root_module.addImport("zecrecy", zecrecy_mod.module("zecrecy"));
 
     const zage_tests_run = b.addRunArtifact(zage_tests);
     const age_tests_run = b.addRunArtifact(age_tests);
