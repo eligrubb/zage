@@ -37,6 +37,9 @@ and GIF, `zage` is pronounced with a hard *g* sound:
 [*ZAH-ghay*](https://en.wikipedia.org/wiki/Help:Pronunciation_respelling_key).
 `zage` is always spelled entirely lowercase.
 
+>[!ALERT]
+>`zage` is currently alpha software and not considered ready for production use
+
 # Quickstart
 
 Generate a keypair:
