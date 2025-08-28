@@ -1,3 +1,0 @@
-{
-  "initCommands": ["command source ~/.lldbinit"]
-}
