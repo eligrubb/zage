@@ -1,5 +1,6 @@
 zig-out/
 .vscode/
+.zed/
 .zig-cache/
 AGENT.md
 AGENTS.md
