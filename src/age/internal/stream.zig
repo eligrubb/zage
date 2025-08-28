@@ -50,11 +50,11 @@ pub const Nonce = struct {
 };
 
 /// STREAMEncrypting is an `Io.Reader` that encrypts chunks of data using the
-/// STREAM variant[^1] described in the age specification. The result is
+/// STREAM[^1] variant described in the age specification. The result is
 /// written to the `Io.Writer` sink.
 ///
 /// [^1]: https://eprint.iacr.org/2015/189
-pub const STREAMEncrypting = struct {
+pub const STREAMEncryption = struct {
     /// ChaCha20Poly1305 key for aead file encryption
     key: SecretBytes,
     /// source Io.Reader
@@ -66,12 +66,18 @@ pub const STREAMEncrypting = struct {
     /// chunk. The last byte should always be `0x00`, unless the final message
     /// chunk is being encrypted.
     nonce: Nonce = .{ .raw = 0 },
-    last_chunk: bool = false,
+    mode: Mode,
 
-    pub fn init(source: *Reader, key: SecretBytes) @This() {
+    pub const Mode = enum {
+        encrypting,
+        decrypting,
+    };
+
+    pub fn init(source: *Reader, key: SecretBytes, comptime mode: Mode) @This() {
         return .{
             .key = key,
             .source = source,
+            .mode = mode,
             .reader = .{
                 .buffer = &[_]u8{},
                 .seek = 0,
@@ -115,32 +121,56 @@ pub const STREAMEncrypting = struct {
     ///
     fn stream(r: *Reader, w: *Writer, limit: Limit) Reader.StreamError!usize {
         if (@intFromEnum(limit) < chunk_size) return 0;
-        const e: *STREAMEncrypting = @alignCast(@fieldParentPtr("reader", r));
+        const e: *STREAMEncryption = @alignCast(@fieldParentPtr("reader", r));
 
-        var write_size = chunk_size;
-        e.source.fill(chunk_size) catch {
-            write_size = e.source.end - e.source.seek;
+        var bytes_sourced = switch (e.mode) {
+            .encrypting => chunk_size,
+            .decrypting => encrypted_chunk_size,
+        };
+
+        e.source.fill(bytes_sourced) catch {
+            bytes_sourced = e.source.end - e.source.seek;
             // the last chunk can only be empty if the entire
             // message is empty
-            if (write_size == 0) assert(e.nonce.raw == 0);
+            if (bytes_sourced == 0) assert(e.nonce.raw == 0);
             e.nonce.setLast();
         };
         e.nonce.incrementCounter();
 
-        // get our message chunk data as a slice pointing to our
-        // source
-        const chunk: []u8 = e.source.buffer[e.source.seek .. e.source.seek + write_size];
-        e.source.seek += write_size;
+        // get our input chunk data as a slice pointing
+        // to our source
+        const source_buffer: []u8 = e.source.buffer[e.source.seek .. e.source.seek + bytes_sourced];
+        e.source.seek += bytes_sourced;
 
-        // get a slice pointing to our sink to write the ciphertext
-        // and authentication tag into
-        const buffer: []u8 = try w.writableSlice(write_size + ChaCha20Poly1305.tag_length);
-        const ciphertext: []u8 = buffer[0..write_size];
-        const tag: *[ChaCha20Poly1305.tag_length]u8 = @ptrCast(buffer[write_size .. write_size + ChaCha20Poly1305.tag_length].ptr);
+        // now lets get a slice of our sink so we have something to write our output to
+        const bytes_sunk = switch (e.mode) {
+            .encrypting => bytes_sourced + ChaCha20Poly1305.tag_length,
+            .decrypting => bytes_sourced - ChaCha20Poly1305.tag_length,
+        };
 
-        // encrypt directly to/from our sink/source
-        ChaCha20Poly1305.encrypt(ciphertext, tag, chunk, &[_]u8{}, e.nonce.toBytes(), e.key.expose()[0..ChaCha20Poly1305.key_length].*);
-        return write_size;
+        const sink_buffer: []u8 = try w.writableSlice(bytes_sunk);
+
+        const message: []u8 = switch (e.mode) {
+            .encrypting => source_buffer,
+            .decrypting => sink_buffer,
+        };
+
+        const ciphertext: []u8 = switch (e.mode) {
+            .encrypting => sink_buffer[0..bytes_sourced],
+            .decrypting => source_buffer[0..bytes_sunk],
+        };
+
+        const tag: *[ChaCha20Poly1305.tag_length]u8 = switch (e.mode) {
+            .encrypting => @ptrCast(sink_buffer[bytes_sourced .. bytes_sourced + ChaCha20Poly1305.tag_length].ptr),
+            .decrypting => @ptrCast(source_buffer[bytes_sunk .. bytes_sunk + ChaCha20Poly1305.tag_length].ptr),
+        };
+
+        switch (e.mode) {
+            .encrypting => ChaCha20Poly1305.encrypt(ciphertext, tag, message, &[_]u8{}, e.nonce.toBytes(), e.key.expose()[0..ChaCha20Poly1305.key_length].*),
+            .decrypting => ChaCha20Poly1305.decrypt(message, ciphertext, tag.*, &[_]u8{}, e.nonce.toBytes(), e.key.expose()[0..ChaCha20Poly1305.key_length].*) catch return error.ReadFailed,
+        }
+
+        return bytes_sourced;
     }
 
     /// Consumes bytes from the internally tracked stream position without
@@ -163,7 +193,7 @@ pub const STREAMEncrypting = struct {
     ///
     /// This function is only called when `buffer` is empty.
     fn discard(r: *Reader, limit: Limit) Reader.Error!usize { // = defaultDiscard,
-        const e: *STREAMEncrypting = @alignCast(@fieldParentPtr("reader", r));
+        const e: *STREAMEncryption = @alignCast(@fieldParentPtr("reader", r));
         return e.source.discard(limit);
     }
 
@@ -178,74 +208,8 @@ pub const STREAMEncrypting = struct {
     /// The default implementation moves buffered data to the start of
     /// `buffer`, setting `seek` to zero, and cannot fail.
     fn rebase(r: *Reader, capacity: usize) Reader.RebaseError!void { //= defaultRebase,
-        const e: *STREAMEncrypting = @alignCast(@fieldParentPtr("reader", r));
+        const e: *STREAMEncryption = @alignCast(@fieldParentPtr("reader", r));
         return e.source.rebase(capacity);
-    }
-};
-
-/// STREAMDecrypting is an `io.AnyReader` that decrypts chunks of data using
-/// the STREAM variant[^1] described in the age specification.
-/// while reading the result to the source `io.AnyReader` interface.
-///
-/// [^1]: https://eprint.iacr.org/2015/189
-pub const STREAMDecrypting = struct {
-    /// ChaCha20Poly1305 key for aead file decryption
-    key: [ChaCha20Poly1305.key_length]u8,
-    /// source Io.AnyReader interface
-    parent_reader: *Reader,
-    /// slice of decrypted but unread data backed by buffer
-    chunk_data: [encrypted_chunk_size]u8,
-    /// STREAMDecrypting Reader interface
-    reader: Reader,
-    /// 12-byte nonce with special format:
-    /// first 11 bytes are a big endian counter that increases with each
-    /// message chunk.
-    /// The last byte should always be `0x00`, unless the final message chunk
-    /// is being decrypted.
-    nonce: [ChaCha20Poly1305.nonce_length]u8 = [_]u8{0} ** ChaCha20Poly1305.nonce_length,
-    last_chunk: bool = false,
-
-    pub fn init(parent: *Reader, key: [ChaCha20Poly1305.key_length]u8) @This() {
-        return .{
-            .key = key,
-            .parent_reader = parent,
-            .chunk_data = [_]u8{0} ** encrypted_chunk_size,
-            .reader = .{
-                // slice of decrypted but unread data backed by chunk_data
-                .buffer = undefined,
-                .seek = 0,
-                .end = 0,
-                .vtable = &.{
-                    .stream = @This().stream,
-                    .discard = @This().discard,
-                },
-            },
-        };
-    }
-
-    fn stream(r: *Reader, w: *Writer, limit: Limit) Reader.StreamError!usize {
-        _ = r;
-        _ = w;
-        _ = limit;
-        @panic("not implemented");
-    }
-
-    fn discard(r: *Reader, limit: Limit) Reader.Error!usize {
-        _ = r;
-        _ = limit;
-        @panic("not implemented");
-    }
-
-    fn readVec(r: *Reader, data: [][]u8) Reader.Error!usize { //= defaultReadVec,
-        _ = r;
-        _ = data;
-        @panic("not implemented");
-    }
-
-    fn rebase(r: *Reader, capacity: usize) Reader.RebaseError!void { //= defaultRebase,
-        _ = r;
-        _ = capacity;
-        @panic("not implemented");
     }
 };
 
@@ -259,7 +223,7 @@ test "test basic STREAMEncrypting reader" {
     var source_buffer: [chunk_size]u8 = undefined;
     var source = source_file.reader(&source_buffer);
     source.mode = source.mode.toStreaming();
-    var encryptor: STREAMEncrypting = .init(&source.interface, key);
+    var encryptor: STREAMEncryption = .init(&source.interface, key, .encrypting);
 
     var sink_file = try std.fs.cwd().openFile("temp.out.txt", .{ .mode = .write_only });
     defer sink_file.close();
