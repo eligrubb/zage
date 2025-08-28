@@ -20,8 +20,6 @@ pub fn build(b: *std.Build) !void {
     // const bech32 = b.dependency("bech32", .{});
     // mod.addImport("bech32", bech32.module("bech32"));
 
-    const tests_step = b.step("test", "Run tests");
-
     const zage_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/zage.zig"),
@@ -39,6 +37,18 @@ pub fn build(b: *std.Build) !void {
         }),
     });
 
+    const stream_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/age/internal/stream.zig"),
+            .target = target,
+            .imports = &.{
+                .{ .name = "zecrecy", .module = zecrecy_mod.module("zecrecy") },
+            },
+        }),
+    });
+
+    b.installArtifact(stream_tests);
+
     const exe = b.addExecutable(.{
         .name = "zage",
         .root_module = b.createModule(.{
@@ -54,11 +64,17 @@ pub fn build(b: *std.Build) !void {
     zage_tests.root_module.addImport("age", age_mod);
     age_tests.root_module.addImport("zecrecy", zecrecy_mod.module("zecrecy"));
 
+    const tests_step = b.step("test", "Run tests");
     const zage_tests_run = b.addRunArtifact(zage_tests);
     const age_tests_run = b.addRunArtifact(age_tests);
+    const stream_tests_run = b.addRunArtifact(stream_tests);
     tests_step.dependOn(&zage_tests_run.step);
     tests_step.dependOn(&age_tests_run.step);
+    tests_step.dependOn(&stream_tests_run.step);
     b.getInstallStep().dependOn(tests_step);
+
+    const stream_tests_step = b.step("test-stream", "Run stream tests");
+    stream_tests_step.dependOn(&stream_tests_run.step);
 
     exe.root_module.addImport("age", age_mod);
 

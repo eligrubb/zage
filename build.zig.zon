@@ -3,8 +3,8 @@
     .version = "0.1.0",
     .dependencies = .{
         .zecrecy = .{
-            .url = "git+https://github.com/eligrubb/zecrecy.git#78357af78b64d1aa00054a40cee408d4d2966635",
-            .hash = "zecrecy-0.1.0-IHpEiRfUAAAfB_sgZLG-FXk49g_t45m-lPREC414aDS5",
+            .url = "git+https://github.com/eligrubb/zecrecy.git#cbbf02c58387f0fba86d080cdc60341b5fac8ede",
+            .hash = "zecrecy-0.1.1-IHpEiV6NAACdplMTMkDq5djErTZOti3OpRU565ck_tnz",
         },
     },
     .fingerprint = 0x7bb75644516747d0,
