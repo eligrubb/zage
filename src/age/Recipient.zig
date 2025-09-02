@@ -21,18 +21,17 @@ pub fn wrapFileKey(self: Recipient, allocator: mem.Allocator, file_key: []const 
 }
 
 const X25519Recipient = @import("x25519.zig").X25519Recipient;
-const SSHRecipient = @import("ssh.zig").SSHRecipient;
+const SshRecipient = @import("ssh.zig").SshRecipient;
 
 pub fn parse(string: []const u8) AgeError!Recipient {
-
     // TODO(eli): handle plugin case?
     return X25519Recipient.initFromBech32String(string) orelse
-        SSHRecipient.initFromString(string) orelse
+        SshRecipient.initFromString(string) orelse
         AgeError.UnknownRecipient;
 }
 
 pub fn parseFile(allocator: mem.Allocator, source: *Io.Reader) AgeError![]Recipient {
-    // TODO: see if we can figure out an initial capacity based on our reader...
+    // TODO(eli): see if we can figure out an initial capacity based on our reader...
     var recipients: std.ArrayList(Recipient) = .initCapacity(allocator, 1);
     errdefer recipients.deinit(allocator);
 
@@ -40,9 +39,8 @@ pub fn parseFile(allocator: mem.Allocator, source: *Io.Reader) AgeError![]Recipi
         const trimmed = utils.trimWhitespace(line);
 
         // ignore empty or comment lines
-        if (trimmed.len == 0 or trimmed[0] == '#') continue;
-
-        try recipients.append(allocator, try parse(trimmed));
+        if (trimmed.len != 0 and trimmed[0] != '#')
+            try recipients.append(allocator, try parse(trimmed));
     } else |err| switch (err) {
         error.EndOfStream => {
             // still need to process the last line this just means it ended
