@@ -49,12 +49,14 @@ pub fn build(b: *std.Build) !void {
 
     b.installArtifact(stream_tests);
 
+    const clap = b.dependency("clap", .{});
     const exe = b.addExecutable(.{
         .name = "zage",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/zage.zig"),
             .imports = &.{
                 .{ .name = "age", .module = age_mod },
+                .{ .name = "clap", .module = clap.module("clap") },
             },
             .target = target,
             .optimize = optimize,
@@ -62,6 +64,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     zage_tests.root_module.addImport("age", age_mod);
+    zage_tests.root_module.addImport("clap", clap.module("clap"));
     age_tests.root_module.addImport("zecrecy", zecrecy_mod.module("zecrecy"));
 
     const tests_step = b.step("test", "Run tests");

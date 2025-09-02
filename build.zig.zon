@@ -6,6 +6,10 @@
             .url = "git+https://github.com/eligrubb/zecrecy.git#cbbf02c58387f0fba86d080cdc60341b5fac8ede",
             .hash = "zecrecy-0.1.1-IHpEiV6NAACdplMTMkDq5djErTZOti3OpRU565ck_tnz",
         },
+        .clap = .{
+            .url = "git+https://github.com/Hejsil/zig-clap#5289e0753cd274d65344bef1c114284c633536ea",
+            .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
+        },
     },
     .fingerprint = 0x7bb75644516747d0,
     .minimum_zig_version = "0.15.1",

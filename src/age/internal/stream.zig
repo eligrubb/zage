@@ -231,9 +231,9 @@ test "test basic STREAMEncrypting reader" {
     var sink = sink_file.writer(&sink_buffer);
     sink.mode = sink.mode.toStreaming();
     try std.testing.expectEqual(source.getSize(), try encryptor.reader.stream(&sink.interface, Limit.unlimited));
-    try sink.interface.flush();
 
-    try std.testing.expect(false);
+    // don't forget to flush!
+    try sink.interface.flush();
 }
 
 test "test basic zecrecy integration" {
