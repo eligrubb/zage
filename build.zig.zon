@@ -10,6 +10,10 @@
             .url = "git+https://github.com/Hejsil/zig-clap#5289e0753cd274d65344bef1c114284c633536ea",
             .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
         },
+        .zeit = .{
+            .url = "git+https://github.com/rockorager/zeit.git?ref=zig-0.15#ed2ca60db118414bda2b12df2039e33bad3b0b88",
+            .hash = "zeit-0.6.0-5I6bk0J9AgCVa0nnyL0lNY9Xa9F68hHq-ZarhuXNV-Jb",
+        },
     },
     .fingerprint = 0x7bb75644516747d0,
     .minimum_zig_version = "0.15.1",

@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(stream_tests);
 
     const clap = b.dependency("clap", .{});
+    const zeit = b.dependency("zeit", .{});
     const exe = b.addExecutable(.{
         .name = "zage",
         .root_module = b.createModule(.{
@@ -57,6 +58,21 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "age", .module = age_mod },
                 .{ .name = "clap", .module = clap.module("clap") },
+                .{ .name = "zeit", .module = zeit.module("zeit") },
+            },
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const keygen_exe = b.addExecutable(.{
+        .name = "zage-keygen",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/zage/zage-keygen.zig"),
+            .imports = &.{
+                .{ .name = "age", .module = age_mod },
+                .{ .name = "clap", .module = clap.module("clap") },
+                .{ .name = "zeit", .module = zeit.module("zeit") },
             },
             .target = target,
             .optimize = optimize,
@@ -82,4 +98,5 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("age", age_mod);
 
     b.installArtifact(exe);
+    b.installArtifact(keygen_exe);
 }
