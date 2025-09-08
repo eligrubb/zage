@@ -44,8 +44,8 @@ const parsers = .{
 
 const KeyGenArgs = struct {
     mode: Mode = .keygen,
-    output: std.fs.File = std.fs.File.stdout(),
-    input: ?std.fs.File = null,
+    output: std.fs.File = .stdout(),
+    input: std.fs.File = .stdin(),
 
     const Mode = enum {
         keygen,
@@ -99,17 +99,33 @@ pub fn main() !void {
         }
 
         if (res.args.output) |path| {
-            args.output = std.fs.cwd().createFile(path, .{}) catch {
-                try utils.printErrorToStdout("Error: Unable to create output file {s}\n", .{path});
-                return;
-            };
+            args.output = if (std.mem.eql(u8, path, "-"))
+                std.fs.File.stdout()
+            else if (std.fs.path.isAbsolute(path))
+                std.fs.createFileAbsolute(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to create output file {s}\n", .{path});
+                    return;
+                }
+            else
+                std.fs.cwd().createFile(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to create output file {s}\n", .{path});
+                    return;
+                };
         }
 
-        if (res.positionals[0]) |input| {
-            args.input = std.fs.cwd().openFile(input, .{}) catch {
-                try utils.printErrorToStdout("Error: Unable to open input file {s}\n", .{input});
-                return;
-            };
+        if (res.positionals[0]) |path| {
+            args.input = if (std.mem.eql(u8, path, "-"))
+                std.fs.File.stdin()
+            else if (std.fs.path.isAbsolute(path))
+                std.fs.createFileAbsolute(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to open input file {s}\n", .{path});
+                    return;
+                }
+            else
+                std.fs.cwd().openFile(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to open input file {s}\n", .{path});
+                    return;
+                };
         }
     }
 
@@ -117,17 +133,15 @@ pub fn main() !void {
         .keygen => {
             var id: age.X25519Identity = try .generate();
 
+            if (!args.output.isTty()) try utils.printToStderr("Public key: {s}\n", .{id.recipient().toBech32String()});
+
             // TODO: optimize the size of the buffer
             var buffer: [1024]u8 = undefined;
             var writer = args.output.writer(&buffer);
 
-            // TODO: condition on if we're not already printing to stdout or
-            // stderr with our output file.
-            try utils.printToStderr("Public key: {s}\n", .{id.recipient().toBech32String()});
-
             const now = try zeit.instant(.{});
             var time_buf: [100]u8 = undefined;
-            // TODO: implement our own version of bufPrint so we can write directly into the output writer?
+            // TODO: implement our own version of bufPrint so we can write directly into the output writer? No time_buf needed?
             try writer.interface.print("# created: {s}\n", .{try now.time().bufPrint(&time_buf, .rfc3339)});
 
             try writer.interface.print("# public key: {s}\n", .{id.recipient().toBech32String()});
@@ -136,8 +150,27 @@ pub fn main() !void {
             try writer.interface.flush();
         },
         .convert => {
-            // TODO: create age.Identity.parse function const ids = try
-            // age.Identity.parse(args.input)
+            var convert_allocator: std.heap.ArenaAllocator = .init(gpa);
+            const allocator = convert_allocator.allocator();
+            // TODO: optimize the size of the buffer
+            var reader_buf: [1024]u8 = undefined;
+            var reader = args.input.reader(&reader_buf);
+            const identities = try age.X25519Identity.parse(allocator, &reader.interface);
+            defer allocator.free(identities);
+
+            // empty input file
+            if (identities.len == 0) return;
+
+            // TODO: optimize size of the buffer
+            var buffer: [1024]u8 = undefined;
+            var writer = args.output.writer(&buffer);
+
+            for (identities) |*identity| {
+                var r: age.X25519Recipient = identity.recipient();
+                try writer.interface.print("{s}\n", .{r.toBech32String()});
+            }
+
+            try writer.interface.flush();
         },
     }
 }

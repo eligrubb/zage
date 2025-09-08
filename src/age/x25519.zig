@@ -371,14 +371,12 @@ test "x25519 basic decryption" {
 test "x25519 parse identities" {
     const allocator = std.testing.allocator;
     const test_format = struct {
-        name: []const u8,
         ids_count: u32,
         err: bool,
         file: []const u8,
     };
     const tests: [2]test_format = [_]test_format{
         .{
-            .name = "valid",
             .ids_count = 2,
             .err = false,
             .file =
@@ -391,7 +389,6 @@ test "x25519 parse identities" {
             ,
         },
         .{
-            .name = "invalid",
             .ids_count = 0,
             .err = true,
             .file =

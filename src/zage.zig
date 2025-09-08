@@ -1,6 +1,7 @@
 const std = @import("std");
 const age = @import("age");
 const clap = @import("clap");
+const fs = std.fs;
 
 const errors = @import("zage/errors.zig");
 const utils = @import("zage/utils.zig");
@@ -17,7 +18,7 @@ const usage_string =
     \\    [INPUT] Path of input file to read from (Default=stdin).
     \\
     \\Options:
-    \\    -o, --output OUTPUT         Path of output file to write to (Default=stdout).
+    \\    -o, --output OUTPUT         Path of output file to write to.
     \\    -v, --version               Print the version information and exit.
     \\    -h, --help                  Print this help message and exit.
     \\
@@ -25,7 +26,7 @@ const usage_string =
     \\    -e, --encrypt               Encrypt the input to the output (DEFAULT).
     \\    -r, --recipient RECIPIENT   Encrypt to the specified RECIPIENT. Can be repeated.
     \\    -R, --recipients-file PATH  Encrypt to the recipients listed at PATH. Can be repeated.
-    \\    -p, --passphrase            Encrypt with a passphrase.
+    \\    -p, --passphrase PASSPHRASE Encrypt with a passphrase.
     \\    -a, --armor                 Encrypt to a PEM encoded format.
     \\    -i, --identity IDENTITY     Path to file of identities, encrypts the input using
     \\                                the corresponding recipients. Can be repeated.
@@ -57,11 +58,12 @@ const usage_string =
 const params_string =
     \\-e, --encrypt                   Encrypt the input to the output (DEFAULT).
     \\-d, --decrypt                   Decrypt the input to the output.
-    \\-o, --output <OUTPUT>           Path of output file to write to (Default=stdout).
+    \\-o, --output <OUTPUT>           Path of output file to write to.
     \\-r, --recipient <RECIPIENT>...  Encrypt to the specified RECIPIENT. Can be repeated.
     \\-R, --recipients-file <PATH>... Encrypt to the recipients listed at PATH. Can be repeated.
     \\-i, --identity <IDENTITY>...    Path to file of identities. Can be repeated.
     \\-p, --passphrase <PASSPHRASE>   Encrypt with a passphrase.
+    \\-a, --armor                     Encrypt to a PEM encoded format.
     \\-j <PLUGIN>                     Use age-plugin-PLUGIN as an identity
     \\-v, --version                   Print the version information and exit.
     \\-h, --help                      Print this help message and exit.
@@ -83,13 +85,13 @@ const ZageArgs = struct {
     // encrypt or decrypt
     mode: Mode = .encrypt,
     // input file
-    input: std.fs.File = std.fs.File.stdin(),
+    input: fs.File = .stdin(),
     // output file
-    output: std.fs.File = std.fs.File.stdout(),
+    output: fs.File = undefined,
     // recipients - file? string? array of strings? or a custom data structure?
-    recipients: []u8 = undefined,
+    recipients: ?fs.File = null,
     // identities - file? string? array of strings? or a custom data structure?
-    identities: []u8 = undefined,
+    identities: ?fs.File = null,
     // passphrase
     passphrase: []u8 = undefined,
     // max work effort - u16 enough? more?
@@ -97,6 +99,7 @@ const ZageArgs = struct {
     // plugin - separate? or do we append it to our identities?
     // do we accept the plugin flag and the identities flag in one call?
     plugin: []u8 = undefined,
+    armor: bool = false,
 
     const Mode = enum {
         encrypt,
@@ -155,36 +158,97 @@ pub fn main() !void {
 
         if (res.args.decrypt != 0) args.mode = .decrypt;
 
-        const cwd = std.fs.cwd();
+        const cwd = fs.cwd();
 
         if (res.args.output) |path| {
-            args.output = cwd.createFile(path, .{}) catch {
-                try utils.printErrorToStdout("Error: Unable to create output file {s}\n", .{path});
+            args.output = if (std.mem.eql(u8, path, "-"))
+                fs.File.stdout()
+            else if (fs.path.isAbsolute(path))
+                fs.createFileAbsolute(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to create output file {s}\n", .{path});
+                    return;
+                }
+            else
+                cwd.createFile(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to create output file {s}\n", .{path});
+                    return;
+                };
+        } else {
+            if (res.args.armor == 0) {
+                try utils.printErrorToStdout("Error: refusing to output binary to the terminal.\nDid you mean to use '-a/--armor'? Force with '-o -'\n", .{});
                 return;
-            };
+            }
+        }
+        if (res.args.armor != 0) {
+            args.armor = true;
         }
         for (res.args.recipient) |r| {
             std.debug.print("recipient: {s}\n", .{r});
         }
         for (res.args.@"recipients-file") |path| {
-            // try cwd.openFile(path, .{});
-            std.debug.print("recipient file: {s}\n", .{path});
+            args.recipients =
+                if (std.mem.eql(u8, path, "-"))
+                    fs.File.stdin()
+                else if (fs.path.isAbsolute(path))
+                    fs.createFileAbsolute(path, .{}) catch {
+                        try utils.printErrorToStdout("Error: Unable to open recipients file {s}\n", .{path});
+                        return;
+                    }
+                else
+                    cwd.openFile(path, .{}) catch {
+                        try utils.printErrorToStdout("Error: Unable to open recipients file {s}\n", .{path});
+                        return;
+                    };
         }
         for (res.args.identity) |path| {
-            // try cwd.openFile(path, .{});
-            std.debug.print("identity file: {s}\n", .{path});
+            args.identities =
+                if (std.mem.eql(u8, path, "-"))
+                    fs.File.stdin()
+                else if (fs.path.isAbsolute(path))
+                    fs.createFileAbsolute(path, .{}) catch {
+                        try utils.printErrorToStdout("Error: Unable to open identities file {s}\n", .{path});
+                        return;
+                    }
+                else
+                    cwd.openFile(path, .{}) catch {
+                        try utils.printErrorToStdout("Error: Unable to open identities file {s}\n", .{path});
+                        return;
+                    };
         }
         if (res.args.passphrase) |pw| {
             std.debug.print("passphrase: {s}\n", .{pw});
         }
         if (res.args.j) |plugin| {
-            std.debug.print("plugin: {s}\n", .{plugin});
+            std.debug.print("plugins unimplemented: {s}\n", .{plugin});
         }
-        if (res.positionals[0]) |input| {
-            args.input = cwd.openFile(input, .{}) catch {
-                try utils.printErrorToStdout("Error: Unable to open input file {s}\n", .{input});
-                return;
-            };
+        if (res.positionals[0]) |path| {
+            args.input = if (std.mem.eql(u8, path, "-"))
+                fs.File.stdin()
+            else if (fs.path.isAbsolute(path))
+                fs.createFileAbsolute(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to open input file {s}\n", .{path});
+                    return;
+                }
+            else
+                cwd.openFile(path, .{}) catch {
+                    try utils.printErrorToStdout("Error: Unable to open input file {s}\n", .{path});
+                    return;
+                };
+        }
+
+        const files = [_]?fs.File{ args.input, args.recipients, args.identities };
+
+        const stdin_handle = fs.File.stdin().handle;
+
+        var count: usize = 0;
+        for (files) |file| {
+            if (file) |f| {
+                if (f.handle == stdin_handle) count += 1;
+            }
+        }
+        if (count >= 2) {
+            try utils.printErrorToStdout("Error: Standard input can't be used for multiple purposes.\n", .{});
+            return;
         }
     }
     std.debug.print("{}\n", .{args});
