@@ -4,12 +4,14 @@ const crypto = std.crypto;
 const mem = std.mem;
 const base64 = std.crypto.codecs.base64;
 const bech32 = @import("internal/bech32.zig");
+const utils = @import("utils.zig");
 
 const AgeError = @import("errors.zig").AgeError;
 const ArrayListAlignedUnmanaged = std.ArrayListAlignedUnmanaged;
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 const HkdfSha256 = std.crypto.kdf.hkdf.HkdfSha256;
 const Identity = @import("Identity.zig").Identity;
+const Io = std.Io;
 const Recipient = @import("Recipient.zig").Recipient;
 const Stanza = @import("Stanza.zig").Stanza;
 const X25519 = std.crypto.dh.X25519;
@@ -41,7 +43,7 @@ pub const X25519Recipient = struct {
 
     /// Returns a new X25519Recipient from a bech32 public key encoding with the "age1" prefix
     pub fn initFromBech32String(bech32_string: []const u8) AgeError!X25519Recipient {
-        assert(bech32_string.len == bech32_encoded_key_length);
+        if (bech32_string.len != bech32_encoded_key_length) return AgeError.IncorrectKeyLength;
         var buf: [bech32.max_data_size]u8 = undefined;
         const decoded = bech32.standard.Decoder.decode(&buf, bech32_string) catch return AgeError.InvalidBech32String;
         if (!mem.eql(u8, decoded.hrp, bech32_public_hrp)) return AgeError.InvalidBech32String;
@@ -151,7 +153,7 @@ pub const X25519Identity = struct {
     /// Returns a new X25519Identity from a bech32 private key encoding
     /// with the "AGE-SECRET-KEY-1" prefix
     pub fn initFromBech32String(private_key: []const u8) AgeError!X25519Identity {
-        assert(private_key.len == bech32_encoded_key_length);
+        if (private_key.len != bech32_encoded_key_length) return AgeError.IncorrectKeyLength;
         var buf: [bech32.max_data_size]u8 = undefined;
         const decoded = bech32.standard_uppercase.Decoder.decode(&buf, private_key) catch return AgeError.InvalidBech32String;
         if (!mem.eql(u8, decoded.hrp, bech32_private_hrp)) return AgeError.InvalidBech32String;
@@ -241,6 +243,44 @@ pub const X25519Identity = struct {
         @memcpy(&encoded_stack, encoded);
         return encoded_stack;
     }
+
+    pub fn parse(allocator: mem.Allocator, reader: *Io.Reader) ![]X25519Identity {
+        // TODO: see if we can figure out an initial capacity based on our reader...
+        var identities: std.ArrayList(X25519Identity) = try .initCapacity(allocator, 0);
+        errdefer identities.deinit(allocator);
+        while (reader.takeDelimiterExclusive('\n')) |line| {
+            const trimmed = utils.trimWhitespace(line);
+
+            // ignore empty or comment lines
+            if (trimmed.len == 0 or trimmed[0] == '#') continue;
+
+            if (X25519Identity.initFromBech32String(trimmed)) |id| {
+                try identities.append(allocator, id);
+            } else |_| {
+                // handle the unknown case probably print to stderr but keep
+                // trying to process identities from other lines
+                // do we just print to stderr and continue trying to process
+                // identities from the remaining lines?
+                // try utils.printToStderr("unknown identity: {s}\n", .{trimmed});
+                return AgeError.InvalidX25519Identity;
+            }
+        } else |err| switch (err) {
+            error.EndOfStream => {
+                // still need to process the last line this just means it ended
+                // on something other than a line break
+            },
+            error.StreamTooLong => {
+                // line couldn't fit in buffer, in theory we can just assume
+                // hitting this error is a malformed identity line, but that
+                // assumes proper size for our parser_buffer
+                // for now... print to stderr and continue looping?
+                // try utils.printToStderr("Error: Line too long for buffer\n", .{});
+                return AgeError.ReaderBufferTooSmall;
+            },
+            else => |e| return e,
+        }
+        return identities.toOwnedSlice(allocator);
+    }
 };
 
 test "x25519 round trip og" {
@@ -326,4 +366,48 @@ test "x25519 basic decryption" {
 
     const decrypted_file_key = try identity.unwrapFileKey(allocator, &stanzas);
     try std.testing.expectEqualSlices(u8, &file_key, &decrypted_file_key);
+}
+
+test "x25519 parse identities" {
+    const allocator = std.testing.allocator;
+    const test_format = struct {
+        name: []const u8,
+        ids_count: u32,
+        err: bool,
+        file: []const u8,
+    };
+    const tests: [2]test_format = [_]test_format{
+        .{
+            .name = "valid",
+            .ids_count = 2,
+            .err = false,
+            .file =
+            \\# this is a comment
+            \\# AGE-SECRET-KEY-1705XN76M8EYQ8M9PY4E2G3KA8DN7NSCGT3V4HMN20H3GCX4AS6HSSTG8D3
+            \\#
+            \\
+            \\AGE-SECRET-KEY-1D6K0SGAX3NU66R4GYFZY0UQWCLM3UUSF3CXLW4KXZM342WQSJ82QKU59QJ
+            \\AGE-SECRET-KEY-19WUMFE89H3928FRJ5U3JYRNHM6CERQGKSQ584AQ8QY7T7R09D32SWE4DYH
+            ,
+        },
+        .{
+            .name = "invalid",
+            .ids_count = 0,
+            .err = true,
+            .file =
+            \\AGE-SECRET-KEY-1705XN76M8EYQ8M9PY4E2G3KA8DN7NSCGT3V4HMN20H3GCX4AS6HSSTG8D3
+            \\AGE-SECRET-KEY--1D6K0SGAX3NU66R4GYFZY0UQWCLM3UUSF3CXLW4KXZM342WQSJ82QKU59Q
+            ,
+        },
+    };
+
+    for (tests) |t| {
+        var reader: Io.Reader = .fixed(t.file);
+        const ids = X25519Identity.parse(allocator, &reader) catch {
+            if (!t.err) try std.testing.expect(false);
+            continue;
+        };
+        if (ids.len != t.ids_count) try std.testing.expect(false);
+        allocator.free(ids);
+    }
 }

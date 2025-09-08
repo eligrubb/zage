@@ -21,9 +21,7 @@ The specification can be found at
 [@Benjojo](https://benjojo.co.uk/) and
 [@FiloSottile](https://bsky.app/profile/filippo.abyssdomain.expert).
 
-example from the primary go library:
-
-```
+```sh
 $ zage-keygen -o key.txt
 Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
 $ tar cvz ~/data | zage -r age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p > data.tar.gz.age
@@ -68,9 +66,9 @@ zage --decrypt -i key.txt data.tar.gz.age > data.tar.gz
 [Download Zig](https://ziglang.org/download/) and run the following commands:
 
 ```sh
-git clone git@github.com:eligrubb/zage.git
-cd zage
-zig build
+$ git clone git@github.com:eligrubb/zage.git
+$ cd zage
+$ zig build
 ```
 
 ## Binary releases (TBD)
@@ -78,7 +76,7 @@ zig build
 # Usage
 
 ```sh
-> zage --help
+$ zage --help
 Usage:
     zage [--encrypt] (-r RECIPIENT | -R PATH)... [-i IDENTITY | -j PLUGIN] [--armor] [-o OUTPUT] [INPUT]
     zage [--encrypt] --passphrase [--armor] [-o OUTPUT] [INPUT]
@@ -135,7 +133,7 @@ Multiple identities may be provided, and any unused ones will be ignored.
 ## `zage-keygen` usage
 
 ```sh
-> zage-keygen --help
+$ zage-keygen --help
 Usage:
     zage-keygen [-o OUTPUT]
     zage-keygen -y [-o OUTPUT] [INPUT]
@@ -157,7 +155,7 @@ If OUTPUT exists, it will be overwritten.
 ## Zig module installation
 
 ```sh
-zig fetch --save ...
+$ zig fetch --save ...
 ```
 
 ## Basic API examples
