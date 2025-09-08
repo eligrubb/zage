@@ -14,21 +14,11 @@
 [![C2SP_specification](https://img.shields.io/badge/%C2%A7%23-specification-blueviolet)](https://age-encryption.org/v1)
 
 A pure Zig implementation of the [`age` file encryption
-standard](https://age-encryption.org/).
+standard](https://age-encryption.org/). The specification can be found at
+[age-encryption.org/v1](https://age-encryption.org/v1).
 
-The specification can be found at
-[age-encryption.org/v1](https://age-encryption.org/v1). `age` was designed by
-[@Benjojo](https://benjojo.co.uk/) and
-[@FiloSottile](https://bsky.app/profile/filippo.abyssdomain.expert).
-
-```sh
-$ zage-keygen -o key.txt
-Public key: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
-$ tar cvz ~/data | zage -r age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p > data.tar.gz.age
-$ zage --decrypt -i key.txt data.tar.gz.age > data.tar.gz
-```
-
-[Like
+`age` was designed by [@Benjojo](https://benjojo.co.uk/) and
+[@FiloSottile](https://bsky.app/profile/filippo.abyssdomain.expert). [Like
 age](https://github.com/FiloSottile/age/blob/15153e699f5b7223b8fd573c3d869092b37749eb/README.md?plain=1#L34)
 and GIF, `zage` is pronounced with a hard *g* sound:
 [`/zɑːgeɪ/`](https://en.wikipedia.org/wiki/Help:IPA/English) or
