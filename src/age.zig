@@ -1,5 +1,5 @@
-pub const Recipient = @import("age/recipient.zig").Recipient;
-pub const Identity = @import("age/identity.zig").Identity;
+pub const Recipient = @import("age/Recipient.zig");
+pub const Identity = @import("age/Identity.zig");
 pub const ScryptRecipient = @import("age/scrypt.zig").ScryptRecipient;
 pub const ScryptIdentity = @import("age/scrypt.zig").ScryptIdentity;
 pub const X25519Recipient = @import("age/x25519.zig").X25519Recipient;

@@ -246,7 +246,7 @@ pub const X25519Identity = struct {
 
     pub fn parse(allocator: mem.Allocator, reader: *Io.Reader) ![]X25519Identity {
         // TODO: see if we can figure out an initial capacity based on our reader...
-        var identities: std.ArrayList(X25519Identity) = try .initCapacity(allocator, 0);
+        var identities: std.ArrayList(X25519Identity) = try .initCapacity(allocator, 1);
         errdefer identities.deinit(allocator);
         while (reader.takeDelimiterExclusive('\n')) |line| {
             const trimmed = utils.trimWhitespace(line);

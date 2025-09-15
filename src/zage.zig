@@ -89,9 +89,9 @@ const ZageArgs = struct {
     // output file
     output: fs.File = undefined,
     // recipients - file? string? array of strings? or a custom data structure?
-    recipients: ?fs.File = null,
+    recipients: std.ArrayList(age.Recipient),
     // identities - file? string? array of strings? or a custom data structure?
-    identities: ?fs.File = null,
+    identities: std.ArrayList(age.Identity),
     // passphrase
     passphrase: []u8 = undefined,
     // max work effort - u16 enough? more?
@@ -109,19 +109,25 @@ const ZageArgs = struct {
 
 pub fn main() !void {
     const gpa = std.heap.page_allocator;
+    var age_arena: std.heap.ArenaAllocator = .init(gpa);
+    const age_allocator = age_arena.allocator();
 
-    var args = ZageArgs{};
+    var args = ZageArgs{
+        .recipients = .initCapacity(age_allocator, 1),
+        .identities = .initCapacity(age_allocator, 1),
+    };
+
     {
-        var args_alloc = std.heap.ArenaAllocator.init(gpa);
-        const allocator = args_alloc.allocator();
-        defer args_alloc.deinit();
+        var args_arena = std.heap.ArenaAllocator.init(gpa);
+        const args_allocator = args_arena.allocator();
+        defer args_arena.deinit();
 
         const params = comptime clap.parseParamsComptime(params_string);
 
         var diag = clap.Diagnostic{};
         const res = clap.parse(clap.Help, &params, parsers, .{
             .diagnostic = &diag,
-            .allocator = allocator,
+            .allocator = args_allocator,
         }) catch |err| {
             // try diag.reportToFile(.stderr(), err);
             switch (err) {
@@ -183,10 +189,15 @@ pub fn main() !void {
             args.armor = true;
         }
         for (res.args.recipient) |r| {
-            std.debug.print("recipient: {s}\n", .{r});
+            const recipient: age.Recipient = .parse(r) catch {
+                try utils.printErrorToStdout("Error: Unable to parse unknown recipient {s}\n", .{r});
+                return;
+            };
+            args.recipients.append(age_allocator, recipient);
         }
         for (res.args.@"recipients-file") |path| {
-            args.recipients =
+            // TODO: handle more than one recipient file
+            const recipients_file =
                 if (std.mem.eql(u8, path, "-"))
                     fs.File.stdin()
                 else if (fs.path.isAbsolute(path))
@@ -199,8 +210,20 @@ pub fn main() !void {
                         try utils.printErrorToStdout("Error: Unable to open recipients file {s}\n", .{path});
                         return;
                     };
+
+            // TODO(eli): figure out the proper size for this buffer
+            var buffer: [1024]u8 = undefined;
+            const recipients = age.Recipient.parseFile(args_allocator, &recipients_file.reader(&buffer).interface) catch {
+                try utils.printErrorToStdout("Error: Unable to parse recipients file {s}\n", .{path});
+                return;
+            };
+
+            for (recipients) |recipient| {
+                args.recipients.append(age_allocator, recipient);
+            }
         }
         for (res.args.identity) |path| {
+            // TODO: handle more than one identity
             args.identities =
                 if (std.mem.eql(u8, path, "-"))
                     fs.File.stdin()

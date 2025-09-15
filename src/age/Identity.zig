@@ -2,7 +2,7 @@ const Stanza = @import("Stanza.zig");
 const AgeError = @import("errors.zig").AgeError;
 const mem = @import("std").mem;
 
-pub const Identity = @This();
+const Identity = @This();
 pub const file_key_length: usize = 16;
 
 ptr: *anyopaque,

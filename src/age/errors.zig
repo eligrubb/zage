@@ -10,4 +10,5 @@ pub const AgeError = error{
     InvalidX25519Identity,
     OutOfMemory,
     ScryptKeyGenerationFailed,
+    UnknownRecipient,
 };
