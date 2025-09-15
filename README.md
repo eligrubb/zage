@@ -20,9 +20,9 @@ found at [age-encryption.org/v1](https://age-encryption.org/v1).
 [@FiloSottile](https://bsky.app/profile/filippo.abyssdomain.expert).
 
 [Like
-age](https://github.com/FiloSottile/age/blob/15153e699f5b7223b8fd573c3d869092b37
-749eb/README.md?plain=1#L34) and GIF, `zage` is pronounced with a hard
-*g* sound: [`/zɑːgeɪ/`](https://en.wikipedia.org/wiki/Help:IPA/English) or
+age](https://github.com/FiloSottile/age/blob/15153e699f5b7223b8fd573c3d869092b37749eb/README.md?plain=1#L34)
+and GIF, `zage` is pronounced with a hard *g* sound:
+[`/zɑːgeɪ/`](https://en.wikipedia.org/wiki/Help:IPA/English) or
 [*ZAH-ghay*](https://en.wikipedia.org/wiki/Help:Pronunciation_respelling_key).
 `zage` is always spelled entirely lowercase.
 
